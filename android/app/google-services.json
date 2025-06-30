@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "216918004194",
+    "project_id": "ruzgarplus-2a597",
+    "storage_bucket": "ruzgarplus-2a597.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:216918004194:android:bea630e64e4b96792da9bb",
+        "android_client_info": {
+          "package_name": "com.example.ruzgarplus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB7oTftHAdQRLad9XuV0dnWgCG5-bPp6o0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

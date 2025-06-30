@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#FF0000" android:padding="16dp">
+
+    <TextView
+        android:id="@+id/blockedAppText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Uygulama Engellendi: \n[Uygulama Adı]"
+        android:textColor="#FFFFFF"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="32dp"/>
+
+    <Button
+        android:id="@+id/goHomeButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Ana Ekrana Dön"
+        android:textColor="#FF0000"
+        android:backgroundTint="#FFFFFF"
+        android:padding="12dp"
+        android:textSize="18sp"/>
+
+</LinearLayout>
