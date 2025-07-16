@@ -49,7 +49,7 @@ repositories {
 dependencies {
     implementation("com.google.firebase:firebase-firestore:24.10.3")
     // Agora SDK (en güncel stabil sürüm için Agora resmi dokümantasyonunu kontrol edin)
-    
+    implementation("com.google.firebase:firebase-messaging:23.4.1")
     implementation("io.agora.rtc:full-sdk:4.1.1")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

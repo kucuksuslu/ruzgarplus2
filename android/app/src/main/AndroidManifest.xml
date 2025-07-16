@@ -2,17 +2,13 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.ruzgarplus">
 
-    <!-- İzinler -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <!-- Yalnızca ses kaydı, bildirim, bluetooth, konum, SMS ve gerekli izinler bırakıldı -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
@@ -27,12 +23,17 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
-    <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" tools:ignore="ProtectedPermissions" />
+
+    <!-- Foreground service sadece ses ve konum için bırakıldı -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
 
     <application
         android:name=".MainApplication"
@@ -108,18 +109,24 @@
             android:name=".OverlayBlockerService"
             android:exported="false"
             android:enabled="true" />
-
-        <!-- Firebase Messaging SERVİSİ! -->
 <service
-    android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
-    android:exported="true"
-    tools:replace="android:exported">
+    android:name=".MyFirebaseMessagingService"
+    android:exported="false">
     <intent-filter>
-        <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
     </intent-filter>
 </service>
 
-        <!-- Android 12+ için RECEIVER EXPORTED EKLENDİ -->
+        <!-- Firebase Messaging SERVİSİ! -->
+        <service
+            android:name="io.flutter.plugins.firebase.messaging.FlutterFirebaseMessagingService"
+            android:exported="true"
+            tools:replace="android:exported">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+
         <receiver
             android:name="org.wonday.orientation.OrientationReceiver"
             android:exported="false">

@@ -18,9 +18,16 @@ class AgoraForegroundService : Service() {
     private var roomId: String? = null
     private var userId: String? = null
     private var role: String? = null
+    private var userType: String? = null
+    private var firebaseUid: String? = null
 
     private var isJoined = false
     private var docListener: ListenerRegistration? = null
+
+    // Kullanıcı listesi (uid, role, userType)
+    private val joinedUsers = mutableListOf<JoinedUser>()
+
+    data class JoinedUser(val uid: Int, val role: String, val userType: String?)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("AgoraService", "onStartCommand called, intent = $intent")
@@ -47,19 +54,27 @@ class AgoraForegroundService : Service() {
         if (roomId == null) {
             roomId = intent?.getStringExtra("roomId") ?: "room_001"
             userId = intent?.getStringExtra("userId") ?: "123456"
-            val userFilter = intent?.getStringExtra("userFilter") ?: ""
-            // userFilter kontrolü: Eğer Aile değilse broadcaster, Aile ise dinleyici
-            role = if (userFilter != "Aile") {
+            userType = intent?.getStringExtra("userType") ?: ""
+            firebaseUid = intent?.getStringExtra("firebase_uid") ?: ""
+
+            // user_type kontrolü: Eğer Aile değilse broadcaster, Aile ise dinleyici
+            role = if (userType != "Aile") {
                 "broadcaster"
             } else {
                 "audience"
             }
-            Log.d("AgoraService", "onStartCommand - roomId: $roomId, userId: $userId, userFilter: $userFilter, role: $role")
+            Log.d(
+                "AgoraService",
+                "onStartCommand - roomId: $roomId, userId: $userId, user_type: $userType, firebase_uid: $firebaseUid, role: $role"
+            )
 
             initAgoraEngine()
             startFirestoreListener()
         } else {
-            Log.d("AgoraService", "onStartCommand tekrar çağrıldı, roomId sabit: $roomId")
+            Log.d(
+                "AgoraService",
+                "onStartCommand tekrar çağrıldı, roomId sabit: $roomId,user_type: $userType"
+            )
         }
         return START_STICKY
     }
@@ -90,7 +105,10 @@ class AgoraForegroundService : Service() {
             val docRoomId = data?.get("roomID") as? String ?: ""
             val docUserId = data?.get("userID") as? String ?: ""
 
-            Log.d("AgoraService", "[SNAPSHOT] status=$status, roomID=$docRoomId, userID=$docUserId, localRoomID=$roomId, localUserID=$userId, isJoined=$isJoined")
+            Log.d(
+                "AgoraService",
+                "[SNAPSHOT] status=$status, roomID=$docRoomId, userID=$docUserId, localRoomID=$roomId, localUserID=$userId, isJoined=$isJoined"
+            )
 
             if (docRoomId == roomId && docUserId == userId) {
                 when {
@@ -98,16 +116,24 @@ class AgoraForegroundService : Service() {
                         Log.d("AgoraService", "Status ACTIVE! joinChannel() çağrılacak")
                         joinChannel()
                     }
+
                     status == "closed" && isJoined -> {
                         Log.d("AgoraService", "Status CLOSED! leaveChannel() çağrılacak")
                         leaveChannel()
                     }
+
                     else -> {
-                        Log.d("AgoraService", "Status değişimi ama işlem gerekmiyor (status: $status, isJoined: $isJoined)")
+                        Log.d(
+                            "AgoraService",
+                            "Status değişimi ama işlem gerekmiyor (status: $status, isJoined: $isJoined)"
+                        )
                     }
                 }
             } else {
-                Log.d("AgoraService", "Snapshot kendi odası değil veya kullanıcıya ait değil. (docRoomId=$docRoomId, docUserId=$docUserId)")
+                Log.d(
+                    "AgoraService",
+                    "Snapshot kendi odası değil veya kullanıcıya ait değil. (docRoomId=$docRoomId, docUserId=$docUserId)"
+                )
             }
         }
     }
@@ -148,12 +174,33 @@ class AgoraForegroundService : Service() {
                         override fun onJoinChannelSuccess(channel: String?, uid: Int, elapsed: Int) {
                             Log.d("AgoraService", "[AGORA] Join success: $channel, uid: $uid")
                             isJoined = true
+                            // Katılan kullanıcıyı listeye ekle
+                            joinedUsers.add(JoinedUser(uid, role ?: "unknown", userType))
+                            logJoinedUsers()
                         }
+
+                        override fun onUserJoined(uid: Int, elapsed: Int) {
+                            Log.d("AgoraService", "[AGORA] Başka kullanıcı katıldı: uid=$uid")
+                            // Burada rol bilgisi yok, sadece uid var
+                            // Listeye ekle (rol ve userType bilinmiyor)
+                            joinedUsers.add(JoinedUser(uid, "unknown", null))
+                            logJoinedUsers()
+                        }
+
+                        override fun onUserOffline(uid: Int, reason: Int) {
+                            Log.d("AgoraService", "[AGORA] Kullanıcı ayrıldı: uid=$uid")
+                            // Listeden çıkar
+                            joinedUsers.removeAll { it.uid == uid }
+                            logJoinedUsers()
+                        }
+
                         override fun onLeaveChannel(stats: RtcStats?) {
                             super.onLeaveChannel(stats)
                             isJoined = false
                             Log.d("AgoraService", "[AGORA] Left channel")
+                            joinedUsers.clear()
                         }
+
                         override fun onError(err: Int) {
                             Log.e("AgoraService", "[AGORA] Agora error: $err")
                         }
@@ -168,42 +215,58 @@ class AgoraForegroundService : Service() {
         }
     }
 
-private fun joinChannel() {
-    Log.d("AgoraService", "joinChannel() çağrıldı")
-    try {
-        agoraEngine?.setChannelProfile(Constants.CHANNEL_PROFILE_LIVE_BROADCASTING)
-        val clientRole = if (role == "broadcaster") {
-            Constants.CLIENT_ROLE_BROADCASTER
-        } else {
-            Constants.CLIENT_ROLE_AUDIENCE
+    private fun logJoinedUsers() {
+        val listString = joinedUsers.joinToString(separator = "\n") {
+            "UID: ${it.uid}, Role: ${it.role}, UserType: ${it.userType ?: "-"}"
         }
-        agoraEngine?.setClientRole(clientRole)
-
-        // Mikrofon kontrolü
-        if (role == "broadcaster") {
-            agoraEngine?.muteLocalAudioStream(false)
-            Log.d("AgoraService", "Broadcaster: Mikrofon AÇIK (muteLocalAudioStream(false))")
-        } else {
-            agoraEngine?.muteLocalAudioStream(true)
-            Log.d("AgoraService", "Audience: Mikrofon KAPALI (muteLocalAudioStream(true))")
-        }
-
-        // HOPARLÖRÜ AÇ
-        agoraEngine?.setEnableSpeakerphone(true)
-        Log.d("AgoraService", "Hoparlör aktif edildi (setEnableSpeakerphone(true))")
-
-        // userId ve userFilter birleştir, hashle ve int'e çevir
-        val combinedId = (userId ?: "") + "_" + (role ?: "") // userFilter yerine role kullandın çünkü filtreye göre rol atanıyor
-        val uidInt = combinedId.hashCode().let { if (it < 0) -it else it } // Pozitif integer
-
-        Log.d("AgoraService", "[AGORA] Kullanıcı UID: $uidInt (combinedId: $combinedId)")
-
-        agoraEngine?.joinChannel(token, roomId, "", uidInt)
-        Log.d("AgoraService", "[AGORA] joinChannel called: $roomId, $userId (uid: $uidInt), role: $role")
-    } catch (e: Exception) {
-        Log.e("AgoraService", "[AGORA] joinChannel error: ${e.message}", e)
+        Log.d(
+            "AgoraService",
+            "=== KANALDAKİ KULLANICILAR ===\n$listString\n=============================="
+        )
     }
-}
+
+    private fun joinChannel() {
+        Log.d("AgoraService", "joinChannel() çağrıldı")
+        try {
+            agoraEngine?.setChannelProfile(Constants.CHANNEL_PROFILE_LIVE_BROADCASTING)
+            val clientRole = if (role == "broadcaster") {
+                Constants.CLIENT_ROLE_BROADCASTER
+            } else {
+                Constants.CLIENT_ROLE_AUDIENCE
+            }
+            agoraEngine?.setClientRole(clientRole)
+
+            // Mikrofon kontrolü
+            if (role == "broadcaster") {
+                agoraEngine?.muteLocalAudioStream(false)
+                Log.d("AgoraService", "Broadcaster: Mikrofon AÇIK (muteLocalAudioStream(false))")
+            } else {
+                agoraEngine?.muteLocalAudioStream(true)
+                Log.d("AgoraService", "Audience: Mikrofon KAPALI (muteLocalAudioStream(true))")
+            }
+            agoraEngine?.adjustPlaybackSignalVolume(400)
+            agoraEngine?.adjustRecordingSignalVolume(400)
+            agoraEngine?.setEnableSpeakerphone(true)
+            Log.d("AgoraService", "Hoparlör aktif edildi (setEnableSpeakerphone(true))")
+
+            // UID üretimi: firebase_uid hashCode kullanılıyor, yoksa userId kullanılır
+            val uidInt = (firebaseUid ?: userId ?: "").hashCode().let { if (it < 0) -it else it }
+
+            Log.d(
+                "AgoraService",
+                "[AGORA] Kullanıcı UID: $uidInt (firebase_uid: $firebaseUid, role: $role, userType: $userType, userId: $userId)"
+            )
+
+            agoraEngine?.joinChannel(token, roomId, "", uidInt)
+            Log.d(
+                "AgoraService",
+                "[AGORA] joinChannel called: $roomId, $userId (uid: $uidInt), role: $role"
+            )
+        } catch (e: Exception) {
+            Log.e("AgoraService", "[AGORA] joinChannel error: ${e.message}", e)
+        }
+    }
+
     private fun leaveChannel() {
         Log.d("AgoraService", "leaveChannel() çağrıldı")
         try {
@@ -214,26 +277,24 @@ private fun joinChannel() {
         }
     }
 
-  override fun onDestroy() {
-    Log.d("AgoraService", "onDestroy called")
-    leaveChannel()
-    docListener?.remove()
-    RtcEngine.destroy()
-    agoraEngine = null
+    override fun onDestroy() {
+        Log.d("AgoraService", "onDestroy called")
+        leaveChannel()
+        docListener?.remove()
+        RtcEngine.destroy()
+        agoraEngine = null
 
-    // Oda status closed yap
-    try {
-        if (roomId != null && userId != null) {
+        // Oda status closed yap
+        try {
             val db = FirebaseFirestore.getInstance()
             val docRef = db.collection("active_audio_rooms").document(roomId!!)
             docRef.update("status", "closed")
             Log.d("AgoraService", "Firestore: Oda status CLOSED yapıldı")
+        } catch (e: Exception) {
+            Log.e("AgoraService", "Firestore status closed yapılamadı: ${e.message}")
         }
-    } catch (e: Exception) {
-        Log.e("AgoraService", "Firestore status closed yapılamadı: ${e.message}")
+        super.onDestroy()
     }
-    super.onDestroy()
-}
 
     override fun onBind(intent: Intent?): IBinder? = null
 }

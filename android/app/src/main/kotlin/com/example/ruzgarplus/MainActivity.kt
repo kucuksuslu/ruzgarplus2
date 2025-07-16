@@ -43,13 +43,14 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        Log.d("MainActivity", "configureFlutterEngine ÇALIŞTI.")
+
         // Uygulama açılır açılmaz izinleri kontrol et ve iste
         ensureMicrophonePermissionsIfNeeded()
 
-   
-
         // OVERLAY KANALI
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OVERLAY_CHANNEL).setMethodCallHandler { call, result ->
+            Log.d("OverlayChannel", "Overlay channel method: ${call.method}")
             when (call.method) {
                 "checkOverlayPermission" -> {
                     val canDraw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -57,9 +58,11 @@ class MainActivity : FlutterActivity() {
                     } else {
                         true
                     }
+                    Log.d("OverlayChannel", "Overlay izni durumu: $canDraw")
                     result.success(canDraw)
                 }
                 "requestOverlayPermission" -> {
+                    Log.d("OverlayChannel", "Overlay izni isteniyor.")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         val intent = Intent(
                             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -72,11 +75,12 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                 }
-                else -> result.notImplemented()
+                else -> {
+                    Log.w("OverlayChannel", "Bilinmeyen method: ${call.method}")
+                    result.notImplemented()
+                }
             }
         }
-
-      
 
         // AGORA ARKA PLAN CANLI YAYIN KANALI
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AGORA_CHANNEL).setMethodCallHandler { call, result ->
@@ -84,22 +88,29 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "startAgoraListening" -> {
                     Log.d("AgoraChannel", "startAgoraListening çağrıldı")
-                    val roomId = call.argument<String>("roomId") ?: "Aile_12345"
                     val userId = call.argument<String>("userId") ?: "12345"
+                    val userType = call.argument<String>("userType") ?: ""
+                     val firebaseUid = call.argument<String>("firebase_uid")
+                    // roomId parametresi yoksa userId + "room" olarak oluştur
+                    val roomId = call.argument<String>("roomId") ?: (userId + "room")
                     val role = call.argument<String>("role") ?: "audience"
-                    val userFilter = call.argument<String>("userFilter") // ← EKLE
+                    val otherUserId = call.argument<String>("otherUserId")
+                    Log.d("AgoraChannel", "Parametreler -> userId: $userId, user_type: $userType, roomId: $roomId, role: $role, otherUserId: $otherUserId")
+
                     val intent = Intent(this, AgoraForegroundService::class.java)
                     intent.putExtra("roomId", roomId)
                     intent.putExtra("userId", userId)
+                     intent.putExtra("firebase_uid", firebaseUid)
+                    intent.putExtra("user_type", userType) // userType doğru key ile eklendi
                     intent.putExtra("role", role)
-                    intent.putExtra("userFilter", userFilter)  
+                    intent.putExtra("otherUserId", otherUserId)
 
                     if (hasAllPermissions()) {
                         Log.d("AgoraChannel", "Tüm izinler var, servis başlatılıyor")
                         startAgoraService(intent)
                         result.success("Başlatıldı")
                     } else {
-                        Log.d("AgoraChannel", "İzinler eksik, izin isteniyor")
+                        Log.d("AgoraChannel", "İzinler eksik, izin isteniyor, pending intent tutuluyor.")
                         pendingAgoraIntent = intent
                         requestAllPermissions()
                         // result.success burada çağrılmaz, izin sonucu callback'te handle edilir!
@@ -112,7 +123,7 @@ class MainActivity : FlutterActivity() {
                     result.success("Durduruldu")
                 }
                 else -> {
-                    Log.d("AgoraChannel", "Bilinmeyen method: ${call.method}")
+                    Log.w("AgoraChannel", "Bilinmeyen method: ${call.method}")
                     result.notImplemented()
                 }
             }
@@ -124,29 +135,39 @@ class MainActivity : FlutterActivity() {
         val notGranted = REQUIRED_PERMISSIONS.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
+        Log.d("MainActivity", "İlk izin kontrolü, eksik izinler: $notGranted")
         if (notGranted.isNotEmpty()) {
+            Log.d("MainActivity", "Eksik izin(ler) isteniyor: $notGranted")
             ActivityCompat.requestPermissions(this, notGranted.toTypedArray(), PERMISSION_REQUEST_CODE)
         }
     }
 
     // Tüm gerekli izinleri kontrol et
     private fun hasAllPermissions(): Boolean {
-        return REQUIRED_PERMISSIONS.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        val result = REQUIRED_PERMISSIONS.all {
+            val granted = ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+            Log.d("MainActivity", "İzin kontrolü: $it -> $granted")
+            granted
         }
+        Log.d("MainActivity", "Tüm izinler var mı? $result")
+        return result
     }
 
     // Gerekli izinleri iste
     private fun requestAllPermissions() {
+        Log.d("MainActivity", "Tüm gerekli izinler isteniyor: ${REQUIRED_PERMISSIONS.toList()}")
         ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQUEST_CODE)
     }
 
     // İzin sonucu callback
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        Log.d("MainActivity", "onRequestPermissionsResult: code=$requestCode, permissions=${permissions.toList()}, grantResults=${grantResults.toList()}")
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (hasAllPermissions()) {
+                Log.d("MainActivity", "Tüm izinler verildi, pending intent var mı? ${pendingAgoraIntent != null}")
                 pendingAgoraIntent?.let {
+                    Log.d("MainActivity", "Agora servisini başlatıyoruz (pendingIntent)")
                     startAgoraService(it)
                     pendingAgoraIntent = null
                 }
@@ -158,9 +179,12 @@ class MainActivity : FlutterActivity() {
 
     // Agora servisini başlat
     private fun startAgoraService(intent: Intent) {
+        Log.d("MainActivity", "startAgoraService çağrıldı. intent: $intent, extras: ${intent.extras}")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Log.d("MainActivity", "startForegroundService ile başlatılıyor.")
             startForegroundService(intent)
         } else {
+            Log.d("MainActivity", "startService ile başlatılıyor.")
             startService(intent)
         }
     }
@@ -183,8 +207,10 @@ class MainActivity : FlutterActivity() {
                     packageName
                 )
             }
+            Log.d("MainActivity", "UsageStats permission mode: $mode")
             mode == AppOpsManager.MODE_ALLOWED
         } catch (e: Exception) {
+            Log.e("MainActivity", "UsageStats permission kontrolünde hata: ${e.message}", e)
             false
         }
     }
