@@ -1,0 +1,66 @@
+name: ruzgarplus
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  http: 1.4.0
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.1.1
+  in_app_purchase: ^3.2.3
+  fluid_bottom_nav_bar: ^1.2.0
+  firebase_core: ^3.14.0
+  cloud_firestore: ^5.6.9
+  firebase_database: ^11.3.7
+  google_maps_flutter: ^2.3.0
+  geolocator: ^14.0.1
+  firebase_messaging: ^15.2.7 
+  
+  audioplayers: ^5.2.1
+  android_intent_plus: ^5.3.0
+  latlong2: ^0.9.0
+  flutter_map: ^8.1.1
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.0
+  image_picker: ^1.1.0
+  flutter_local_notifications: ^17.1.0
+  path_provider: ^2.1.1
+  video_player: ^2.8.1 
+  usage_stats: ^1.2.0
+  intl: ^0.18.0
+  firebase_auth: 5.6.0
+
+  path: ^1.8.3
+  agora_rtc_engine: ^6.2.2
+  flip_card: ^0.7.0
+  url_launcher: ^6.2.5
+  location: ^8.0.0
+  permission_handler: 11.4.0
+  emoji_picker_flutter: ^4.3.0
+  
+  cupertino_icons: ^1.0.8
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/plusicon.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/backlog_fixed.mp4
+
+# --- SÜRÜM SABİTLEME (override) ---
