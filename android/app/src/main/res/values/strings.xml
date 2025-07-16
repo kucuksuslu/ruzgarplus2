@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ruzgarplus</string>
+    <string name="accessibility_service_description">Uygulama kısıtlama servisi. Engelli uygulama açılırsa ana ekrana atar.</string>
+    <!-- diğer stringler -->
+</resources>
