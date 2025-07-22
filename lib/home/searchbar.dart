@@ -1,31 +1,37 @@
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
-import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+
+const Color primaryColor = Color(0xFF5e17eb);
+const Color accentColor = Color(0xFFff1585);
+const Color bgColor = Color(0xFFf7f5fb);
+const Color cardBg = Color(0xFFe6e3f5);
+const Color areaBorderColor = primaryColor;
+const double cardElevation = 4.0;
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
-
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
-class _SearchPageState extends State<SearchPage> {
+class _SearchPageState extends State<SearchPage> with SingleTickerProviderStateMixin {
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
   MapController mapController = MapController();
 
   List<Marker> markers = [];
   List<Map<String, dynamic>> allLocations = [];
   LatLng? myPosition;
-  String searchQuery = '';
+  List<bool> showBubbleList = [];
+  bool showMyBubble = true;
 
   int? _userId;
   int? _parentId;
@@ -45,21 +51,49 @@ class _SearchPageState extends State<SearchPage> {
 
   bool _disposed = false;
 
-  static const String locationIqApiKey = 'pk.fa04e03ad4bc91e7e95e2d5e33fd249b'; // <-- BURAYA kendi API key'ini yaz!
-  static const String mapTilerKey = '9mDxXPWnyEAbexVqNUJs'; // <-- BURAYA KENDİ MAPTILER API KEY'İNİ YAZ!
+  static const String locationIqApiKey = 'pk.fa04e03ad4bc91e7e95e2d5e33fd249b';
+  static const String mapTilerKey = '9mDxXPWnyEAbexVqNUJs';
+
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<Color?> _colorAnimation;
 
   @override
   void initState() {
     super.initState();
-    developer.log('initState ÇALIŞTI', name: 'DEBUG');
-    print("SearchPage initState ÇALIŞTI");
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat(reverse: true);
+
+    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.13).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+
+    _colorAnimation = TweenSequence<Color?>(
+      [
+        TweenSequenceItem(
+          tween: ColorTween(begin: accentColor, end: primaryColor),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: ColorTween(begin: primaryColor, end: Colors.greenAccent),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: ColorTween(begin: Colors.greenAccent, end: Colors.orange),
+          weight: 1,
+        ),
+        TweenSequenceItem(
+          tween: ColorTween(begin: Colors.orange, end: accentColor),
+          weight: 1,
+        ),
+      ],
+    ).animate(_animationController);
+
     _loadUserInfo().then((_) async {
-      print('initState: _userType=$_userType, _userId=$_userId, _parentId=$_parentId');
       if (_userType == 'Aile' && _userId != null) {
         await _loadChildrenCurrentLocations(_userId!);
-        print('buraya girdi: _userType=$_userType, _userId=$_userId');
-      } else {
-        print('else bloğu, şart sağlanmadı! _userType=$_userType, _userId=$_userId');
       }
       _listenLocations();
       _listenAreaLimit();
@@ -67,32 +101,32 @@ class _SearchPageState extends State<SearchPage> {
       if (_userType == 'Aile') {
         _startPositionStream();
       }
-    }).catchError((e, st) {
-      developer.log('initState: then bloğunda hata: $e $st', name: 'DEBUG');
     });
   }
 
+  @override
+  void dispose() {
+    _disposed = true;
+    _firestoreLocationSubscription?.cancel();
+    _positionStreamSubscription?.cancel();
+    _areaLimitSubscription?.cancel();
+    _animationController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadUserInfo() async {
-    try {
-      developer.log('_loadUserInfo: başladı', name: 'DEBUG');
-      final prefs = await SharedPreferences.getInstance();
-      developer.log('_loadUserInfo: prefs alındı', name: 'DEBUG');
-      if (_disposed) return;
-      setState(() {
-        _userId = prefs.getInt('user_id');
-        _parentId = prefs.getInt('parent_id');
-        _userType = prefs.getString('user_type');
-        _userName = prefs.getString('appcustomer_name');
-      });
-      developer.log('_loadUserInfo: bitti $_userId, $_userType', name: 'DEBUG');
-    } catch (e, st) {
-      developer.log('_loadUserInfo: hata $e $st', name: 'DEBUG');
-    }
+    final prefs = await SharedPreferences.getInstance();
+    if (_disposed) return;
+    setState(() {
+      _userId = prefs.getInt('user_id');
+      _parentId = prefs.getInt('parent_id');
+      _userType = prefs.getString('user_type');
+      _userName = prefs.getString('appcustomer_name');
+    });
   }
 
   void _listenAreaLimit() {
     final areaLimitId = _userType == 'Aile' ? _userId?.toString() : _parentId?.toString();
-    developer.log('_listenAreaLimit: areaLimitId=$areaLimitId', name: 'DEBUG');
     if (areaLimitId == null) return;
     _areaLimitSubscription?.cancel();
     _areaLimitSubscription = firestore
@@ -101,7 +135,6 @@ class _SearchPageState extends State<SearchPage> {
         .snapshots()
         .listen((doc) {
       if (_disposed) return;
-      developer.log('_listenAreaLimit: doc.exists=${doc.exists} doc.data=${doc.data()}', name: 'DEBUG');
       if (doc.exists && doc.data() != null) {
         final data = doc.data()!;
         if (!mounted) return;
@@ -123,7 +156,6 @@ class _SearchPageState extends State<SearchPage> {
 
   void _listenLocations() {
     _firestoreLocationSubscription?.cancel();
-    developer.log('_listenLocations: _userId=$_userId, _userType=$_userType', name: 'DEBUG');
     if (_userId == null || _userType == null) return;
 
     if (_userType == 'Aile') {
@@ -141,7 +173,7 @@ class _SearchPageState extends State<SearchPage> {
           if (lat != null && lng != null) {
             locs.add({
               'id': data['user_id'],
-              'name': data['appcustomer_name'] ?? data['name'] ?? '',
+              'appcustomer_name': data['appcustomer_name'] ?? data['name'] ?? '',
               'position': LatLng(lat, lng),
               'user_type': data['user_type'],
               'profile_image_url': data['profile_image_url'],
@@ -155,6 +187,7 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {
           allLocations = locs;
           _childCurrentLocations = locs;
+          showBubbleList = List.generate(locs.length, (index) => true);
           _updateMarkers();
         });
       });
@@ -173,7 +206,7 @@ class _SearchPageState extends State<SearchPage> {
           if (lat != null && lng != null) {
             locs.add({
               'id': data['user_id'],
-              'name': data['appcustomer_name'] ?? data['name'] ?? '',
+              'appcustomer_name': data['appcustomer_name'] ?? data['name'] ?? '',
               'position': LatLng(lat, lng),
               'user_type': data['user_type'],
               'profile_image_url': data['profile_image_url'],
@@ -186,6 +219,7 @@ class _SearchPageState extends State<SearchPage> {
         if (!mounted) return;
         setState(() {
           allLocations = locs;
+          showBubbleList = List.generate(locs.length, (index) => true);
           _updateMarkers();
         });
       });
@@ -214,37 +248,32 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
-  /// LocationIQ ile kısa adres döner
- Future<String> getShortAddress(double lat, double lng, {int retryCount = 0}) async {
-  final key = '$lat,$lng';
-  if (_addressCache.containsKey(key)) {
-    return _addressCache[key]!;
-  }
-  try {
-    final url = Uri.parse(
-      'https://us1.locationiq.com/v1/reverse.php?key=$locationIqApiKey&lat=$lat&lon=$lng&format=json'
-    );
-    final response = await http.get(url);
-    print("LocationIQ response (${response.statusCode}): ${response.body}");
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final address = data['display_name']?.toString() ?? '';
-      if (address.isNotEmpty && address != "Adres getirilemedi") {
-        _addressCache[key] = address;
-        return address;
-      }
+  Future<String> getShortAddress(double lat, double lng, {int retryCount = 0}) async {
+    final key = '$lat,$lng';
+    if (_addressCache.containsKey(key)) {
+      return _addressCache[key]!;
     }
-  } catch (e) {
-    print("Adres hatası: $e");
+    try {
+      final url = Uri.parse(
+        'https://us1.locationiq.com/v1/reverse.php?key=$locationIqApiKey&lat=$lat&lon=$lng&format=json'
+      );
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final address = data['display_name']?.toString() ?? '';
+        if (address.isNotEmpty && address != "Adres getirilemedi") {
+          _addressCache[key] = address;
+          return address;
+        }
+      }
+    } catch (e) {}
+    if (retryCount < 2) {
+      await Future.delayed(const Duration(seconds: 2));
+      return await getShortAddress(lat, lng, retryCount: retryCount + 1);
+    }
+    _addressCache[key] = "Adres getirilemedi";
+    return "Adres getirilemedi";
   }
-  // Yeniden denesin (max 2 tekrar)
-  if (retryCount < 2) {
-    await Future.delayed(const Duration(seconds: 2));
-    return await getShortAddress(lat, lng, retryCount: retryCount + 1);
-  }
-  _addressCache[key] = "Adres getirilemedi";
-  return "Adres getirilemedi";
-}
 
   String formatTimestamp(dynamic timestamp) {
     if (timestamp == null) return "";
@@ -275,7 +304,7 @@ class _SearchPageState extends State<SearchPage> {
       if (lat == null || lng == null) continue;
       children.add({
         'user_id': data['user_id'],
-        'name': data['appcustomer_name'] ?? data['name'] ?? '',
+        'appcustomer_name': data['appcustomer_name'] ?? data['name'] ?? '',
         'latitude': lat,
         'longitude': lng,
         'timestamp': data['timestamp'],
@@ -337,7 +366,7 @@ class _SearchPageState extends State<SearchPage> {
         'user_id': _userId,
         'user_type': 'Çocuk',
         'parent_id': _parentId,
-        'name': _userName ?? '',
+        'appcustomer_name': _userName ?? '',
         'latitude': position.latitude,
         'longitude': position.longitude,
         'timestamp': FieldValue.serverTimestamp(),
@@ -350,64 +379,6 @@ class _SearchPageState extends State<SearchPage> {
       });
       _checkIfOutsideAreaLimit();
     });
-  }
-
-  void _updateMarkers() {
-    List<Marker> newMarkers = [];
-
-    for (var i = 0; i < allLocations.length; i++) {
-      var loc = allLocations[i];
-      final profileImageUrl = loc['profile_image_url'];
-      newMarkers.add(
-        Marker(
-          point: loc['position'],
-          width: 46,
-          height: 46,
-          child: Tooltip(
-            message: loc['name'],
-            child: (profileImageUrl != null && profileImageUrl.toString().isNotEmpty)
-                ? ClipOval(
-                    child: Image.network(
-                      profileImageUrl,
-                      width: 44,
-                      height: 44,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => Icon(
-                        Icons.person_pin_circle,
-                        color: loc['user_type'] == 'Çocuk' ? Colors.green : Colors.blue,
-                        size: 35,
-                      ),
-                    ),
-                  )
-                : Icon(
-                    Icons.person_pin_circle,
-                    color: loc['user_type'] == 'Çocuk' ? Colors.green : Colors.blue,
-                    size: 35,
-                  ),
-          ),
-        ),
-      );
-    }
-
-    if (myPosition != null) {
-      newMarkers.add(
-        Marker(
-          point: myPosition!,
-          width: 48,
-          height: 48,
-          child: Tooltip(
-            message: "Benim Konumum",
-            child: Icon(
-              Icons.location_on,
-              color: Colors.red,
-              size: 44,
-            ),
-          ),
-        ),
-      );
-    }
-
-    markers = newMarkers;
   }
 
   double _distanceBetween(LatLng p1, LatLng p2) {
@@ -432,9 +403,12 @@ class _SearchPageState extends State<SearchPage> {
       if (distance > _areaRadiusMeter!) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Dikkat! Alan sınırının dışındasın!'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: const Text('Dikkat! Alan sınırının dışındasın!'),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.symmetric(horizontal: 40, vertical: 8),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           ),
         );
       }
@@ -448,7 +422,9 @@ class _SearchPageState extends State<SearchPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Alan Seç (km²)'),
+          backgroundColor: cardBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('Alan Seç (km²)', style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -461,13 +437,15 @@ class _SearchPageState extends State<SearchPage> {
                       divisions: 99,
                       value: tempArea,
                       label: '${tempArea.toStringAsFixed(1)} km²',
+                      activeColor: accentColor,
+                      inactiveColor: accentColor.withOpacity(0.2),
                       onChanged: (v) {
                         setStateDialog(() {
                           tempArea = v;
                         });
                       },
                     ),
-                    Text('${tempArea.toStringAsFixed(1)} km²'),
+                    Text('${tempArea.toStringAsFixed(1)} km²', style: TextStyle(color: primaryColor)),
                   ],
                 ),
               ),
@@ -475,6 +453,11 @@ class _SearchPageState extends State<SearchPage> {
           ),
           actions: [
             TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: accentColor,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
               onPressed: () async {
                 double areaM2 = tempArea * 1000000;
                 double radiusMeter = sqrt(areaM2 / pi);
@@ -489,7 +472,7 @@ class _SearchPageState extends State<SearchPage> {
                 });
                 Navigator.pop(context);
               },
-              child: Text('Kaydet'),
+              child: const Text('Kaydet'),
             ),
           ],
         );
@@ -497,225 +480,477 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  @override
-  void dispose() {
-    _disposed = true;
-    _firestoreLocationSubscription?.cancel();
-    _positionStreamSubscription?.cancel();
-    _areaLimitSubscription?.cancel();
-    super.dispose();
+  void _updateMarkers() {
+    List<Marker> newMarkers = [];
+    for (var i = 0; i < allLocations.length; i++) {
+      var loc = allLocations[i];
+      final profileImageUrl = loc['profile_image_url'];
+
+      newMarkers.add(
+        Marker(
+          key: ValueKey('marker_$i'),
+          point: loc['position'],
+          width: 160,
+          height: 180,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // BALONCUK: TAM ALTINDA ve küçük
+              Positioned(
+                top: 56,
+                left: 30,
+                right: 30,
+                child: Visibility(
+                  visible: showBubbleList.length > i && showBubbleList[i],
+                  child: AnimatedOpacity(
+                    opacity: showBubbleList.length > i && showBubbleList[i] ? 1 : 0,
+                    duration: const Duration(milliseconds: 80),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          showBubbleList[i] = false;
+                        });
+                      },
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 100),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.88),
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(color: accentColor.withOpacity(0.4), width: 0.6),
+                          boxShadow: [],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.person, color: accentColor.withOpacity(0.6), size: 13),
+                            const SizedBox(width: 2),
+                            Flexible(
+                              child: Text(
+                                loc['appcustomer_name'] ?? '',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: primaryColor,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // İKON: ORTADA
+              Positioned(
+                top: 20,
+                left: 62, // (160-36)/2
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      showBubbleList[i] = !showBubbleList[i];
+                    });
+                  },
+                  child: profileImageUrl != null && profileImageUrl.toString().isNotEmpty
+                      ? Material(
+                          elevation: cardElevation,
+                          shape: const CircleBorder(),
+                          clipBehavior: Clip.antiAlias,
+                          child: CircleAvatar(
+                            backgroundImage: NetworkImage(profileImageUrl),
+                            radius: 15,
+                            backgroundColor: Colors.white,
+                          ),
+                        )
+                      : Icon(
+                          Icons.person_pin_circle,
+                          color: accentColor.withOpacity(0.7),
+                          size: 30,
+                          shadows: [],
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // KENDİ KONUMUN
+    if (myPosition != null) {
+      newMarkers.add(
+        Marker(
+          key: const ValueKey('marker_myself'),
+          point: myPosition!,
+          width: 160,
+          height: 180,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // BALONCUK: TAM ÜSTÜNDE ve küçük
+              Positioned(
+                top: 0,
+                left: 36,
+                right: 36,
+                child: Visibility(
+                  visible: showMyBubble,
+                  child: AnimatedOpacity(
+                    opacity: showMyBubble ? 1 : 0,
+                    duration: const Duration(milliseconds: 80),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          showMyBubble = false;
+                        });
+                      },
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 90),
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.85),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: accentColor.withOpacity(0.3), width: 0.5),
+                          boxShadow: [],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.my_location, color: accentColor.withOpacity(0.65), size: 12),
+                            const SizedBox(width: 2),
+                            Flexible(
+                              child: Text(
+                                "Konumum",
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: primaryColor,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // İKON: ORTADA
+              Positioned(
+                top: 22,
+                left: 62,
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      showMyBubble = !showMyBubble;
+                    });
+                  },
+                  child: Icon(
+                    Icons.location_on,
+                    color: accentColor.withOpacity(0.7),
+                    size: 30,
+                    shadows: [],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    setState(() {
+      markers = newMarkers;
+    });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    developer.log(
-        'build: _userType=$_userType, _childCurrentLocations.isNotEmpty=${_childCurrentLocations.isNotEmpty}',
-        name: 'DEBUG');
-    return Scaffold(
-      backgroundColor: const Color(0xFFff1585).withOpacity(0.03),
-      appBar: AppBar(
-        title: const Text('Konum Bul'),
-        backgroundColor: const Color(0xFF5e17eb),
-        foregroundColor: Colors.white,
-        elevation: 8,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.only(
+@override
+Widget build(BuildContext context) {
+  return Scaffold(
+    backgroundColor: bgColor,
+    appBar: PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight + 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF8D6E63).withOpacity(0.15),
+          border: Border.all(
+            color: const Color(0xFF6B5048),
+            width: 3,
+          ),
+          borderRadius: const BorderRadius.only(
             bottomLeft: Radius.circular(26),
             bottomRight: Radius.circular(26),
           ),
         ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFFff1585), width: 4),
-                borderRadius: BorderRadius.circular(22),
-              ),
-              margin: const EdgeInsets.all(10),
-              child: Stack(
-                children: [
-                  FlutterMap(
-                    options: MapOptions(
-                      initialCenter: myPosition ?? LatLng(39.925533, 32.866287),
-                      initialZoom: myPosition != null ? 8 : 5, // <<< BURAYI DEĞİŞTİRDİK!
-                      onLongPress: (_tapPos, latlng) async {
-                        if (_userType == 'Aile') {
-                          await _showRadiusSelectionDialog(context, latlng);
-                        }
-                      },
-                    ),
-                    mapController: mapController,
-                    children: [
-                      TileLayer(
-                        urlTemplate:
-                            'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=$mapTilerKey',
-                        subdomains: const ['a', 'b', 'c'],
-                        userAgentPackageName: 'com.example.app',
+        child: AppBar(
+          title: Row(
+            children: [
+              AnimatedBuilder(
+                animation: _animationController,
+                builder: (context, child) => Transform.scale(
+                  scale: _scaleAnimation.value,
+                  child: Icon(
+                    Icons.search,
+                    color: Colors.black,
+                    size: 32,
+                    shadows: [
+                      Shadow(
+                        blurRadius: 16,
+                        color: _colorAnimation.value?.withOpacity(0.4) ?? accentColor,
+                        offset: const Offset(2, 2),
                       ),
-                      MarkerLayer(markers: markers),
-                      if (_areaCenter != null && _areaRadiusMeter != null)
-                        PolygonLayer(
-                          polygons: [
-                            Polygon(
-                              points: _createCirclePoints(
-                                  _areaCenter!, _areaRadiusMeter!),
-                              color:
-                                  const Color(0xFFff1585).withOpacity(0.13),
-                              borderColor: const Color(0xFF5e17eb),
-                              borderStrokeWidth: 3,
-                            ),
-                          ],
-                        ),
                     ],
                   ),
-                  if (_userType == 'Aile')
-                    Positioned(
-                      top: 18,
-                      right: 18,
-                      child: ElevatedButton.icon(
-                        icon: const Icon(Icons.gps_fixed,
-                            color: Color(0xFF5e17eb)),
-                        label: const Text('Alan Seç',
-                            style: TextStyle(color: Color(0xFF5e17eb))),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          side: const BorderSide(
-                              color: Color(0xFF5e17eb), width: 2),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16)),
-                          elevation: 0,
-                        ),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'Haritada uzun basarak merkez seçin!')),
-                          );
-                        },
-                      ),
-                    ),
-                ],
+                ),
               ),
+              const SizedBox(width: 8),
+              const Text('Konum Bul'),
+              const Spacer(),
+              AnimatedBuilder(
+                animation: _animationController,
+                builder: (context, child) => Transform.scale(
+                  scale: _scaleAnimation.value * 0.9,
+                  child: const Icon(
+                    Icons.wifi_tethering,
+                    color: Colors.black,
+                    size: 28,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+          ),
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.black,
+          elevation: 0,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(26),
+              bottomRight: Radius.circular(26),
             ),
           ),
-          if (_userType == 'Aile' && _childCurrentLocations.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
+        ),
+      ),
+    ),
+    body: Column(
+      children: [
+        // ÇOCUKLARIN GÜNCEL KONUMU ALANI (HARİTANIN ÜSTÜNDE SABİT)
+        if (_userType == 'Aile' && _childCurrentLocations.isNotEmpty)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(8, 10, 8, 2),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.96),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: accentColor.withOpacity(0.09),
+                  blurRadius: 18,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(left: 8, top: 2, bottom: 2),
+                  child: Text(
                     'Çocukların Güncel Konumları',
                     style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        color: Colors.black),
                   ),
-                  const SizedBox(height: 6),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _childCurrentLocations
-                          .map(
-                            (child) => Card(
-                              color: Colors.blue.shade50,
-                              margin:
-                                  const EdgeInsets.symmetric(horizontal: 4),
-                              child: Container(
-                                width: 275,
-                                padding: const EdgeInsets.all(4),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        (child["profile_image_url"] != null &&
-                                                child["profile_image_url"]
-                                                    .toString()
-                                                    .isNotEmpty)
-                                            ? CircleAvatar(
-                                                backgroundImage: NetworkImage(
-                                                    child["profile_image_url"]),
-                                              )
-                                            : const CircleAvatar(
-                                                child: Icon(Icons.person)),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            child["name"] != null &&
-                                                    child["name"]
-                                                        .toString()
-                                                        .trim()
-                                                        .isNotEmpty
-                                                ? "Çocuğun İsmi : ${child["name"]}"
-                                                : "Çocuğun İsmi : yok",
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const Divider(),
-                                    FutureBuilder<String>(
-                                      future: getShortAddress(
-                                          child["latitude"],
-                                          child["longitude"]),
-                                      builder: (context, snapshot) {
-                                        String addr =
-                                            snapshot.data ?? "Adres getirilemedi";
-                                        return Row(
-                                          children: [
-                                            const Icon(Icons.place,
-                                                size: 16, color: Colors.green),
-                                            const SizedBox(width: 4),
-                                            Expanded(
-                                              child: Text(
-                                                "Adres: $addr",
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.access_time,
-                                            size: 16, color: Colors.purple),
-                                        const SizedBox(width: 4),
-                                        Expanded(
-                                          child: Text(
-                                            "Tarih: ${formatTimestamp(child["timestamp"])}",
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
+                ),
+                const SizedBox(height: 4),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: _childCurrentLocations
+                        .map(
+                          (child) => AnimatedBuilder(
+                            animation: _animationController,
+                            builder: (context, childWidget) => Transform.scale(
+                              scale: _scaleAnimation.value,
+                             child: Card(
+  margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+  elevation: cardElevation,
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  child: Container(
+    width: 270,
+    // Yükseklik sabitlemek için (gerekirse) aşağıdaki satırı ekleyebilirsin:
+    // constraints: BoxConstraints(maxHeight: 120),
+    decoration: BoxDecoration(
+      color: const Color(0xFF8D6E63).withOpacity(0.12),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    padding: const EdgeInsets.all(6), // padding'i küçült
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        (child["profile_image_url"] != null &&
+                child["profile_image_url"].toString().isNotEmpty)
+            ? CircleAvatar(
+                backgroundImage: NetworkImage(child["profile_image_url"]),
+                radius: 14,
+                backgroundColor: Colors.white,
+              )
+            : const CircleAvatar(
+                child: Icon(Icons.person, size: 16),
+                backgroundColor: Colors.white,
+                radius: 14,
+              ),
+        const SizedBox(height: 2), // daha az boşluk
+        const Text(
+          "Çocuk İsmi:",
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+        ),
+        Text(
+          child["appcustomer_name"] != null && child["appcustomer_name"].toString().trim().isNotEmpty
+              ? child["appcustomer_name"]
+              : "İsim yok",
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 2),
+        // Divider yerine ince bir çizgi veya hiç kullanmayabilirsin
+        // Container(height: 1, color: Colors.grey[300]),
+        FutureBuilder<String>(
+          future: getShortAddress(child["latitude"], child["longitude"]),
+          builder: (context, snapshot) {
+            String addr = snapshot.data ?? "Adres getirilemedi";
+            return Row(
+              children: [
+                const Icon(Icons.place, size: 11, color: Colors.green),
+                const SizedBox(width: 2),
+                Expanded(
+                  child: Text(
+                    "Adres: $addr",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Colors.black87),
                   ),
-                  const SizedBox(height: 8),
-                ],
+                ),
+              ],
+            );
+          },
+        ),
+        Row(
+          children: [
+            const Icon(Icons.access_time, size: 11, color: primaryColor),
+            const SizedBox(width: 2),
+            Expanded(
+              child: Text(
+                "Tarih: ${formatTimestamp(child["timestamp"])}",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w500),
               ),
             ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      ],
+    ),
+  ),
+),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        // HARİTA ALANI (ALTTA, TÜM GENİŞLİKTE)
+        Expanded(
+          child: Stack(
+            children: [
+              FlutterMap(
+                options: MapOptions(
+                  initialCenter:
+                      myPosition ?? LatLng(39.925533, 32.866287),
+                  initialZoom: myPosition != null ? 8 : 5,
+                  onLongPress: (_tapPos, latlng) async {
+                    if (_userType == 'Aile') {
+                      await _showRadiusSelectionDialog(context, latlng);
+                    }
+                  },
+                ),
+                mapController: mapController,
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://api.maptiler.com/maps/streets/{z}/{x}/{y}.png?key=$mapTilerKey',
+                    subdomains: const ['a', 'b', 'c'],
+                    userAgentPackageName: 'com.example.app',
+                  ),
+                  MarkerLayer(markers: markers),
+                  if (_areaCenter != null && _areaRadiusMeter != null)
+                    PolygonLayer(
+                      polygons: [
+                        Polygon(
+                          points: _createCirclePoints(
+                              _areaCenter!, _areaRadiusMeter!),
+                          color: accentColor.withOpacity(0.17),
+                          borderColor: areaBorderColor,
+                          borderStrokeWidth: 3,
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              // "Alan Seç" butonu (harita üstünde sağ üstte sabit)
+              if (_userType == 'Aile')
+                Positioned(
+                  top: 18,
+                  right: 18,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.gps_fixed, color: primaryColor),
+                    label: const Text('Alan Seç',
+                        style: TextStyle(color: primaryColor)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: primaryColor, width: 2),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text(
+                              'Haritada uzun basarak merkez seçin!'),
+                          backgroundColor: accentColor.withOpacity(0.95),
+                          behavior: SnackBarBehavior.floating,
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 40, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18)),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
-  List<LatLng> _createCirclePoints(LatLng center, double radiusMeter,
-      {int points = 72}) {
+  List<LatLng> _createCirclePoints(LatLng center, double radiusMeter, {int points = 72}) {
     const earthRadius = 6371000.0;
     final List<LatLng> circlePoints = [];
     final double lat = center.latitude * pi / 180.0;
@@ -727,9 +962,7 @@ class _SearchPageState extends State<SearchPage> {
       final double lngOffset = dy / (earthRadius * cos(lat));
       final double pointLat = lat + latOffset;
       final double pointLng = center.longitude * pi / 180.0 + lngOffset;
-      circlePoints.add(LatLng(
-          pointLat * 180.0 / pi,
-          pointLng * 180.0 / pi));
+      circlePoints.add(LatLng(pointLat * 180.0 / pi, pointLng * 180.0 / pi));
     }
     return circlePoints;
   }

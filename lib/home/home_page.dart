@@ -10,7 +10,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'dart:math';
 import 'body.dart';
 import 'searchbar.dart';
 import 'not.dart';
@@ -19,13 +19,13 @@ import 'srocna.dart';
 import 'chat_page.dart';
 import '../deneme.sayfa.dart';
 import '../background_service.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 // --- SABİT RENKLER ---
 const Color accentPink = Color(0xFFFF1585);
 const Color accentPurple = Color(0xFF5E17EB);
 const Color lightPurple = Color(0xFFF6F2FB);
 
-// --- Service setup and user functions ---
+// --- TÜM FONKSİYONLAR ---
 Future<void> startBackgroundService() async {
   final service = FlutterBackgroundService();
   await service.configure(
@@ -42,7 +42,23 @@ Future<void> startBackgroundService() async {
   );
   await service.startService();
 }
-
+Future<String?> updateAndSaveFCMToken(FirebaseFirestore firestore, int userId) async {
+  String? fcmToken = await FirebaseMessaging.instance.getToken();
+  if (fcmToken != null && fcmToken.isNotEmpty) {
+    await firestore.collection('users').doc(userId.toString()).set({
+      'fcm_token': fcmToken
+    }, SetOptions(merge: true));
+  }
+  return fcmToken;
+}
+Future<void> handleFCMErrorIfNeeded(
+    FirebaseFirestore firestore, int userId, http.Response response) async {
+  if (response.statusCode == 400 && response.body.contains("not a valid FCM registration token")) {
+    // Tokenı sil ve yenile
+    await FirebaseMessaging.instance.deleteToken();
+    await updateAndSaveFCMToken(firestore, userId);
+  }
+}
 Future<void> updateLiveUserStatus({
   required int? currentUserId,
   required String? userType,
@@ -60,9 +76,9 @@ Future<void> updateLiveUserStatus({
     'last_active': FieldValue.serverTimestamp(),
     'app_exit': appExit,
   };
-  String? fcmToken = await FirebaseMessaging.instance.getToken();
+  String? fcmToken = await updateAndSaveFCMToken(firestore, currentUserId);
   if (fcmToken != null) data['fcm_token'] = fcmToken;
-  if (userType != null) data['filter'] = userType;
+  if (userType != null) data['userType'] = userType;
   data['user_id'] = currentUserId;
   await liveUsersDocRef.set(data, SetOptions(merge: true));
   await usersDocRef.set({
@@ -70,6 +86,7 @@ Future<void> updateLiveUserStatus({
     'last_active': FieldValue.serverTimestamp(),
   }, SetOptions(merge: true));
 }
+
 
 Future<void> logoutAll() async {
   try {
@@ -273,15 +290,216 @@ void setupFCMListeners() async {
   FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {});
 }
 
-// --- BookPageView (content card) UZUN, BOŞLUKSUZ, RESİM KÜÇÜK VE ORTADA --- //
+// --- AnimatedDownArrow: İçeriklerin sağ alt köşesinde, overflow güvenli. ---
+class AnimatedDownArrow extends StatefulWidget {
+  final EdgeInsetsGeometry? padding;
+  const AnimatedDownArrow({Key? key, this.padding}) : super(key: key);
+
+  @override
+  State<AnimatedDownArrow> createState() => _AnimatedDownArrowState();
+}
+class _AnimatedDownArrowState extends State<AnimatedDownArrow>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0, end: 24).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: widget.padding ?? const EdgeInsets.only(top: 6, bottom: 2, right: 10),
+      child: AnimatedBuilder(
+        animation: _animation,
+        builder: (context, child) => Transform.translate(
+          offset: Offset(0, _animation.value),
+          child: child,
+        ),
+        child: Icon(
+          Icons.keyboard_arrow_down_rounded,
+          size: 42,
+          color: accentPurple.withOpacity(0.8),
+        ),
+      ),
+    );
+  }
+}
+
+// --- Yatay çocuk listesi: Overflow güvenli, min boyutlar! ---
+class HorizontalChildrenList extends StatelessWidget {
+  final List<Map<String, dynamic>> children;
+  final void Function() refresh;
+  final Future<void> Function(String childDocId) onDelete;
+  final Future<void> Function(String childDocId) onProfileImageUpdate;
+
+  const HorizontalChildrenList({
+    super.key,
+    required this.children,
+    required this.refresh,
+    required this.onDelete,
+    required this.onProfileImageUpdate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) {
+      return const Center(
+        child: Text(
+          'Henüz eklenmiş bir çocuk yok.',
+          style: TextStyle(fontSize: 16, color: Colors.grey),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    return SizedBox(
+      height: 120, // Burayı artır! (140, 150, 160 deneyebilirsin)
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+        itemCount: children.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final child = children[index];
+          final childDocId = child['id'] as String;
+          final profileImageUrl = child['profile_image_url'] as String?;
+return Container(
+  width: 200,
+  height: 150,
+  child: Card(
+    elevation: 4, // daha belirgin gölge
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(22),
+      side: BorderSide(
+        color: Color(0xFF8D6E63), // kahverengi kenar
+        width: 2,
+      ),
+    ),
+    color: Color(0xFFFFF8E1), // krem arkaplan
+    shadowColor: Color(0xFF8D6E63).withOpacity(0.15), // kahverengi gölge
+    child: Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+ colors: [
+    Color(0xFFBDA8AC), // kenar rengi (bda8ac)
+    Color(0xFFF8F6F6), // iç arkaplan (5c4448)
+  ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: () async {
+                await onProfileImageUpdate(childDocId);
+                refresh();
+              },
+              child: CircleAvatar(
+                radius: 22,
+                backgroundColor: Colors.black,
+                backgroundImage: (profileImageUrl != null && profileImageUrl.startsWith('http'))
+                    ? NetworkImage(profileImageUrl)
+                    : null,
+                child: (profileImageUrl == null)
+                    ? Icon(Icons.add_a_photo, color: Colors.white, size: 19)
+                    : null,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                child['appcustomer_name'] ?? "",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Colors.black,
+                  letterSpacing: 0.18,
+                  shadows: [
+                    Shadow(
+                      color: accentPurple.withOpacity(0.09),
+                      offset: Offset(0, 1),
+                      blurRadius: 2,
+                    ),
+                  ],
+                ),
+                textAlign: TextAlign.left,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+              ),
+            ),
+            Container(
+              width: 2.5,
+              height: 46,
+              margin: EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: accentPurple.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+   Container(
+  decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(9),
+  ),
+  child: Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        "Sil",
+        style: TextStyle(
+          color: Colors.black,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      GestureDetector(
+        onTap: () async {
+          await onDelete(childDocId);
+          refresh();
+        },
+        child: Icon(
+          Icons.delete,
+          color: Colors.black,
+          size: 22,
+        ),
+      ),
+    ],
+  ),
+)
+          ],
+        ),
+      ),
+    ),
+  ),
+);
+        },
+      ),
+    );
+  }
+}
+
+// --- BookPageView: İçerik ve sağ altta ok animasyonu ---
 class BookPageView extends StatefulWidget {
   final List<DocumentSnapshot> docs;
   const BookPageView({super.key, required this.docs});
-
   @override
   State<BookPageView> createState() => _BookPageViewState();
 }
-
 class _BookPageViewState extends State<BookPageView> {
   PageController _controller = PageController();
   int _currentPage = 0;
@@ -292,107 +510,123 @@ class _BookPageViewState extends State<BookPageView> {
     final double screenHeight = MediaQuery.of(context).size.height;
     final double screenWidth = MediaQuery.of(context).size.width;
 
-    return Column(
+    // Kart genişliğini azaltmak için maxWidth'i belirliyoruz (ör: ekranın %80'i)
+    final double cardWidth = min(screenWidth * 0.8, 310);
+
+    return Stack(
       children: [
-        Expanded(
-          child: PageView.builder(
-            controller: _controller,
-            itemCount: total,
-            onPageChanged: (index) {
-              setState(() {
-                _currentPage = index;
-              });
-            },
-            itemBuilder: (context, index) {
-              final data = widget.docs[index].data() as Map<String, dynamic>;
-              return Container(
-                width: screenWidth,
-                // En uzun scrollable içerik için
-                constraints: BoxConstraints(
-                  minWidth: screenWidth,
-                  minHeight: screenHeight,
-                  maxWidth: screenWidth,
-                  maxHeight: screenHeight,
-                ),
-                child: Card(
-                  elevation: 20,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(40),
-                  ),
-                  color: Colors.white,
-                  margin: EdgeInsets.zero,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          data['title'] ?? "Başlıksız",
-                          style: const TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.bold,
-                            color: accentPurple,
-                            letterSpacing: 1.2,
-                          ),
-                          textAlign: TextAlign.center,
+        Column(
+          children: [
+            Expanded(
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: total,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentPage = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final data = widget.docs[index].data() as Map<String, dynamic>;
+                  return Center(
+                    child: Container(
+                      width: cardWidth,
+                      constraints: BoxConstraints(
+                        minWidth: 180,
+                        maxWidth: cardWidth,
+                        minHeight: screenHeight * 0.5,
+                        maxHeight: screenHeight,
+                      ),
+                      child: Card(
+                        elevation: 15,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(32),
                         ),
-                        const SizedBox(height: 8),
-                        if (data['image_url'] != null &&
-                            data['image_url'].toString().isNotEmpty)
-                          Center(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(18),
-                              child: Image.network(
-                                data['image_url'],
-                                width: screenWidth * 0.35,
-                                height: screenHeight * 0.16,
-                                fit: BoxFit.contain,
-                                errorBuilder: (c, e, s) => Icon(Icons.broken_image, size: 50, color: accentPink),
+                        color: Colors.white,
+                        margin: EdgeInsets.zero,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                data['title'] ?? "Başlıksız",
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                  letterSpacing: 1.1,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                            ),
+                              const SizedBox(height: 10), // Başlık ile resim arası boşluk
+                              if (data['image_url'] != null && data['image_url'].toString().isNotEmpty)
+                                Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 7.0), // Resmin üst-altına boşluk!
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(28),
+                                      child: Image.network(
+                                        data['image_url'],
+                                        width: cardWidth * 0.34, // Genişlik azaltıldı!
+                                        height: screenHeight * 0.20,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (c, e, s) => Icon(Icons.broken_image, size: 56, color: accentPink),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 8), // Resim ile içerik arası boşluk
+                              Text(
+                                (data['content'] ?? data['description'] ?? ""),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.black87,
+                                  height: 1.38,
+                                ),
+                                textAlign: TextAlign.justify,
+                              ),
+                            ],
                           ),
-                        const SizedBox(height: 12),
-                        Text(
-                          (data['content'] ?? data['description'] ?? ""),
-                          style: const TextStyle(
-                            fontSize: 24,
-                            color: Colors.black87,
-                            height: 1.4,
-                          ),
-                          textAlign: TextAlign.justify,
                         ),
-                      ],
+                      ),
                     ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios),
+                    onPressed: _currentPage > 0
+                        ? () => _controller.previousPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOut)
+                        : null,
                   ),
-                ),
-              );
-            },
-          ),
+                  Text(
+                    "Sayfa ${_currentPage + 1} / $total",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: accentPurple),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_forward_ios),
+                    onPressed: _currentPage < total - 1
+                        ? () => _controller.nextPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOut)
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_ios),
-                onPressed: _currentPage > 0
-                    ? () => _controller.previousPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOut)
-                    : null,
-              ),
-              Text(
-                "Sayfa ${_currentPage + 1} / $total",
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: accentPurple),
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_forward_ios),
-                onPressed: _currentPage < total - 1
-                    ? () => _controller.nextPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOut)
-                    : null,
-              ),
-            ],
-          ),
-        ),
+        // AnimatedDownArrow widget'ın örneğini eklemelisin veya comment-out yapabilirsin
+        // Positioned(
+        //   right: 8,
+        //   bottom: 18,
+        //   child: AnimatedDownArrow(),
+        // ),
       ],
     );
   }
@@ -402,16 +636,238 @@ Future<List<DocumentSnapshot>> _fetchAllContent(
     String category, String? userType, FirebaseFirestore firestore) async {
   final creatorsSnap = await firestore
       .collection('content_creators')
-      .where('category', isEqualTo: userType)
+      .where('category', isEqualTo: category)
       .get();
-  final contentSnap = await firestore
-      .collection('content')
-      .where('category', isEqualTo: userType)
-      .get();
-  return [...creatorsSnap.docs, ...contentSnap.docs];
+  return [...creatorsSnap.docs];
 }
+Widget _contentCard(BuildContext context, DocumentSnapshot doc, String titleLabel) {
+  final data = doc.data() as Map<String, dynamic>;
+  final double cardWidth = min(MediaQuery.of(context).size.width * 0.32, 350);
+  final double screenHeight = MediaQuery.of(context).size.height;
 
-Widget buildContentBookForCategory(
+  return Card(
+    elevation: 10,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+    color: Colors.white,
+    child: Container(
+      width: cardWidth,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            titleLabel,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: Colors.black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            data['title'] ?? "Başlıksız",
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          if (data['image_url'] != null && data['image_url'].toString().isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Image.network(
+                data['image_url'],
+                width: cardWidth * 0.90,
+                height: min(120, screenHeight * 0.16),
+                fit: BoxFit.contain,
+                errorBuilder: (c, e, s) => const Icon(Icons.broken_image, size: 36, color: accentPink),
+              ),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            (data['content'] ?? data['description'] ?? ""),
+            style: const TextStyle(
+              fontSize: 14,
+              color: Colors.black87,
+              height: 1.32,
+            ),
+            textAlign: TextAlign.justify,
+            maxLines: 6,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    ),
+  );
+}
+Widget _splitCardSection(
+    BuildContext context, DocumentSnapshot doc, String label, bool left) {
+  final data = doc.data() as Map<String, dynamic>;
+  final double cardWidth = min(MediaQuery.of(context).size.width * 0.42, 400);
+  final double screenHeight = MediaQuery.of(context).size.height;
+
+  return Padding(
+    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+    child: Column(
+      crossAxisAlignment:
+          left ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+            color: accentPurple,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          data['title'] ?? "Başlıksız",
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
+          textAlign: left ? TextAlign.left : TextAlign.right,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 8),
+        if (data['image_url'] != null && data['image_url'].toString().isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.network(
+              data['image_url'],
+              width: cardWidth * 0.70,
+              height: min(80, screenHeight * 0.54),
+              fit: BoxFit.cover,
+              errorBuilder: (c, e, s) =>
+                  Icon(Icons.broken_image, size: 30, color: accentPink),
+            ),
+          ),
+    
+       
+      ],
+    ),
+  );
+}
+Widget _onlyImageLinkSection(BuildContext context, DocumentSnapshot doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  final double cardWidth = min(MediaQuery.of(context).size.width * 0.42, 400);
+  final double screenHeight = MediaQuery.of(context).size.height;
+
+  // Uzun link için veri: image_url (resim), link_url (link)
+  final String? imageUrl = data['image_url'] as String?;
+  final String? linkUrl = data['link_url'] as String?;
+
+  return Padding(
+    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (imageUrl != null && imageUrl.isNotEmpty)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.network(
+              imageUrl,
+              width: cardWidth * 0.90,
+              height: min(120, screenHeight * 0.17),
+              fit: BoxFit.cover,
+              errorBuilder: (c, e, s) =>
+                  Icon(Icons.broken_image, size: 36, color: accentPink),
+            ),
+          ),
+        const SizedBox(height: 14),
+        if (linkUrl != null && linkUrl.isNotEmpty)
+          InkWell(
+            onTap: () async {
+              if (await canLaunchUrl(Uri.parse(linkUrl))) {
+                await launchUrl(Uri.parse(linkUrl), mode: LaunchMode.externalApplication);
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Text(
+                linkUrl,
+                style: TextStyle(
+                  color: accentPurple,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  decoration: TextDecoration.underline,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 5, // Linki tam uzun gösterir, ekrana taşarsa kaydırır
+                overflow: TextOverflow.visible, // Tüm linki göster
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+Widget _fullImageTitleLinkSection(BuildContext context, DocumentSnapshot doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  final String? imageUrl = data['image_url'] as String?;
+  final String? linkUrl = data['content'] as String?;
+  final String? title = data['title'] as String?;
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      if (title != null && title.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Colors.black,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      Expanded(
+        child: imageUrl != null && imageUrl.isNotEmpty && linkUrl != null && linkUrl.isNotEmpty
+            ? InkWell(
+               onTap: () async {
+  final uri = Uri.parse(linkUrl!);
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Link açılamıyor: $linkUrl'))
+    );
+  }
+},
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.network(
+                    imageUrl,
+                      width: 150,  
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (c, e, s) =>
+                        Icon(Icons.broken_image, size: 40, color: accentPink),
+                  ),
+                ),
+              )
+            : Container(
+                color: Colors.grey[200],
+                child: Icon(Icons.image, size: 40, color: Colors.grey),
+                width: double.infinity,
+                height: double.infinity,
+              ),
+      ),
+    ],
+  );
+}
+Widget buildContentSplitForCategory(
     String category, String? userType, FirebaseFirestore firestore) {
   return FutureBuilder<List<DocumentSnapshot>>(
     future: _fetchAllContent(category, userType, firestore),
@@ -423,120 +879,53 @@ Widget buildContentBookForCategory(
       if (docs.isEmpty) {
         return const Center(child: Text("İçerik bulunamadı."));
       }
-      return BookPageView(docs: docs); // Padding yok, tam ekran!
-    },
-  );
-}
+      // İlk iki içerik
+      final first = docs.isNotEmpty ? docs[0] : null;
+      final second = docs.length > 1 ? docs[1] : null;
 
-class PaginatedChildrenList extends StatefulWidget {
-  final List<Map<String, dynamic>> children;
-  final void Function() refresh;
-  final Future<void> Function(String childDocId) onDelete;
-  final Future<void> Function(String childDocId) onProfileImageUpdate;
-  const PaginatedChildrenList({
-    super.key,
-    required this.children,
-    required this.refresh,
-    required this.onDelete,
-    required this.onProfileImageUpdate,
-  });
+      final double cardWidth = MediaQuery.of(context).size.width * 0.96;
+      final double cardHeight = min(MediaQuery.of(context).size.height * 0.47, 350);
 
-  @override
-  State<PaginatedChildrenList> createState() => _PaginatedChildrenListState();
-}
-
-class _PaginatedChildrenListState extends State<PaginatedChildrenList> {
-  int pageIndex = 0;
-  static const int childrenPerPage = 2;
-
-  @override
-  Widget build(BuildContext context) {
-    final totalPages =
-        (widget.children.length / childrenPerPage).ceil().clamp(1, 999);
-    final start = pageIndex * childrenPerPage;
-    final end = (start + childrenPerPage).clamp(0, widget.children.length);
-    final childrenOnPage = widget.children.sublist(start, end);
-
-    return Column(
-      children: [
-        ...childrenOnPage.map((child) {
-          final childDocId = child['id'] as String;
-          final profileImageUrl = child['profile_image_url'] as String?;
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            color: lightPurple,
-            child: ListTile(
-              leading: GestureDetector(
-                onTap: () async {
-                  await widget.onProfileImageUpdate(childDocId);
-                  widget.refresh();
-                },
-                child: CircleAvatar(
-                  radius: 25,
-                  backgroundColor: accentPink.withOpacity(0.16),
-                  backgroundImage: (profileImageUrl != null &&
-                          profileImageUrl.startsWith('http'))
-                      ? NetworkImage(profileImageUrl)
-                      : null,
-                  child: (profileImageUrl == null)
-                      ? const Icon(Icons.add_a_photo,
-                          color: accentPurple, size: 28)
-                      : null,
-                ),
-              ),
-              title: Text(
-                child['appcustomer_name'] ?? "",
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: accentPurple,
-                ),
-              ),
-              trailing: IconButton(
-                icon: const Icon(Icons.delete, color: accentPink, size: 28),
-                onPressed: () async {
-                  await widget.onDelete(childDocId);
-                  widget.refresh();
-                },
-              ),
-            ),
-          );
-        }).toList(),
-        if (widget.children.length > childrenPerPage)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
+      return Center(
+        child: Card(
+          elevation: 12,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+          color: Colors.white,
+          child: Container(
+            width: cardWidth,
+            height: cardHeight,
+            padding: const EdgeInsets.all(12),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: pageIndex > 0
-                      ? () => setState(() => pageIndex--)
-                      : null,
+                // Sol bölüm: İlk içerik
+                Expanded(
+                  child: first == null
+                      ? Center(child: Text("İlk içerik yok"))
+                      : _fullImageTitleLinkSection(context, first),
                 ),
-                Text(
-                  "Sayfa ${pageIndex + 1} / $totalPages",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                // Dikey ayraç
+                Container(
+                  width: 2.5,
+                  height: double.infinity,
+                  color: accentPurple.withOpacity(0.15),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  onPressed: pageIndex < totalPages - 1
-                      ? () => setState(() => pageIndex++)
-                      : null,
+                // Sağ bölüm: İkinci içerik
+                Expanded(
+                  child: second == null
+                      ? Center(child: Text("İkinci içerik yok"))
+                      : _fullImageTitleLinkSection(context, second),
                 ),
               ],
             ),
           ),
-      ],
-    );
-  }
+        ),
+      );
+    },
+  );
 }
 
-// --- Panel functions ---
+
+// --- HomePage ve panel kodu ---
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -552,10 +941,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int? _parentId;
   List<Map<String, dynamic>> _children = [];
   Timer? _heartbeatTimer;
-
-  static const Color accentPink = Color(0xFFFF1585);
-  static const Color accentPurple = Color(0xFF5E17EB);
-  static const Color lightPurple = Color(0xFFF6F2FB);
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -589,27 +974,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
     });
   }
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {}
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _heartbeatTimer?.cancel();
-    if (_currentUserId != null) {
-      updateLiveUserStatus(
-        currentUserId: _currentUserId,
-        userType: _userType,
-        online: false,
-        lastNotifiedAppStatus: "Uygulama kapalı",
-        appExit: true,
-        firestore: _firestore,
-      );
-    }
-    logoutAll();
-    super.dispose();
+@override
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (_currentUserId == null) return;
+  if (state == AppLifecycleState.detached) {
+    // Uygulama tamamen kapandı
+    updateLiveUserStatus(
+      currentUserId: _currentUserId,
+      userType: _userType,
+      online: false,
+      lastNotifiedAppStatus: "Uygulama kapalı",
+      appExit: true,
+      firestore: _firestore,
+    );
+  } else if (state == AppLifecycleState.resumed) {
+    // Uygulama tekrar öne geldi, online yap
+    updateLiveUserStatus(
+      currentUserId: _currentUserId,
+      userType: _userType,
+      online: true,
+      lastNotifiedAppStatus: "Uygulama açık",
+      appExit: false,
+      firestore: _firestore,
+    );
   }
+  // paused ve inactive için hiçbir şey yapma!
+}
+  @override
+void dispose() {
+  WidgetsBinding.instance.removeObserver(this);
+  _heartbeatTimer?.cancel();
+  if (_currentUserId != null) {
+    // Uygulama tamamen kapanınca offline yap
+    updateLiveUserStatus(
+      currentUserId: _currentUserId,
+      userType: _userType,
+      online: false,
+      lastNotifiedAppStatus: "Uygulama kapalı",
+      appExit: true,
+      firestore: _firestore,
+    );
+  }
+  logoutAll();
+  super.dispose();
+}
 
-  Widget buildAilePanel() {
+ Widget buildAilePanel() {
     return Column(
       children: [
         Padding(
@@ -624,102 +1034,259 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               showDialog(
                 context: context,
                 builder: (BuildContext context) {
-                  return AlertDialog(
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
+                  return Dialog(
                     backgroundColor: lightPurple,
-                    title: const Text('Yeni Çocuk Ekle',
-                        style: TextStyle(color: accentPurple)),
-                    content: SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextField(
-                            onChanged: (val) => childName = val,
-                            decoration: const InputDecoration(
-                              hintText: 'Çocuğun Adı',
-                            ),
-                          ),
-                          TextField(
-                            onChanged: (val) => childEmail = val,
-                            decoration: const InputDecoration(
-                              hintText: 'Çocuğun E-posta',
-                            ),
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          TextField(
-                            obscureText: true,
-                            onChanged: (val) => childPassword = val,
-                            decoration: const InputDecoration(
-                              hintText: 'Çocuğun Şifresi',
-                            ),
-                          ),
-                          TextField(
-                            onChanged: (val) => childTc = val,
-                            decoration: const InputDecoration(
-                              hintText: 'Çocuğun TC Kimlik No',
-                            ),
-                            keyboardType: TextInputType.number,
-                            maxLength: 11,
-                          ),
-                          TextField(
-                            onChanged: (val) => childPhone = val,
-                            decoration: const InputDecoration(
-                              hintText: 'Çocuğun Telefon Numarası',
-                            ),
-                            keyboardType: TextInputType.phone,
-                            maxLength: 11,
-                          ),
-                        ],
-                      ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+       child: SingleChildScrollView(
+  child: Center(
+    child: Container(
+      width: 280, // Genişlik ayarı
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 32,
+              backgroundColor: Color(0xFF6B5048),
+              child: const Icon(Icons.person_add, color: Colors.white, size: 30),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Yeni Çocuk Ekle',
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 22,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 14),
+          SizedBox(
+  height: 48,
+  child: TextField(
+    decoration: InputDecoration(
+  hintText: 'Çocuğun Adı',
+  prefixIcon: Padding(
+    padding: EdgeInsets.only(left: 8), // Solda 8px boşluk
+    child: Icon(Icons.person, size: 16, color: Colors.black),
+  ),
+  prefixIconConstraints: BoxConstraints(minHeight: 32, minWidth: 32), // minWidth'i biraz artırabilirsin!
+  filled: true,
+  fillColor: Color(0xFF8D6E63).withOpacity(0.15),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.black, width: 1.5),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.white, width: 2),
+  ),
+  contentPadding: EdgeInsets.zero,
+  isDense: true,
+),
+    style: TextStyle(fontSize: 13),
+  ),
+),
+            
+          const SizedBox(height: 8),
+SizedBox(
+  height: 48,
+  child: TextField(
+    onChanged: (val) => childEmail = val,
+   decoration: InputDecoration(
+  hintText: 'Çocuğun E-posta',
+  prefixIcon: Padding(
+    padding: EdgeInsets.only(left: 8), // Solda 8px boşluk
+    child: Icon(Icons.email, size: 16, color: Colors.black),
+  ),
+  prefixIconConstraints: BoxConstraints(minHeight: 32, minWidth: 32), // minWidth'i biraz artırdık
+  filled: true,
+  fillColor: Color(0xFF8D6E63).withOpacity(0.15),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.black, width: 1.5),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.white, width: 2),
+  ),
+  contentPadding: EdgeInsets.zero,
+  isDense: true,
+),
+    keyboardType: TextInputType.emailAddress,
+    style: TextStyle(fontSize: 13),
+  ),
+),
+const SizedBox(height: 8),
+SizedBox(
+  height: 48,
+  child: TextField(
+    obscureText: true,
+    onChanged: (val) => childPassword = val,
+  decoration: InputDecoration(
+  hintText: 'Çocuğun Şifresi',
+  prefixIcon: Padding(
+    padding: EdgeInsets.only(left: 8), // Solda 8px boşluk
+    child: Icon(Icons.lock, size: 16, color: Colors.black),
+  ),
+  prefixIconConstraints: BoxConstraints(minHeight: 32, minWidth: 32), // minWidth biraz artırıldı
+  filled: true,
+  fillColor: Color(0xFF8D6E63).withOpacity(0.15),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.black, width: 1.5),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.white, width: 2),
+  ),
+  contentPadding: EdgeInsets.zero,
+  isDense: true,
+),
+    style: TextStyle(fontSize: 13),
+  ),
+),
+const SizedBox(height: 8),
+SizedBox(
+  height: 48,
+  child: TextField(
+    onChanged: (val) => childTc = val,
+ decoration: InputDecoration(
+  hintText: 'Çocuğun TC Kimlik No',
+  prefixIcon: Padding(
+    padding: EdgeInsets.only(left: 8), // Solda 8px boşluk
+    child: Icon(Icons.credit_card, size: 16, color: Colors.black),
+  ),
+  prefixIconConstraints: BoxConstraints(minHeight: 32, minWidth: 32), // minWidth artırıldı
+  filled: true,
+  fillColor: Color(0xFF8D6E63).withOpacity(0.15),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.black, width: 1.5),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.white, width: 2),
+  ),
+  contentPadding: EdgeInsets.zero,
+  isDense: true,
+  counterText: '',
+),
+    keyboardType: TextInputType.number,
+    maxLength: 11,
+    style: TextStyle(fontSize: 13),
+  ),
+),
+const SizedBox(height: 8),
+SizedBox(
+  height: 48,
+  child: TextField(
+    onChanged: (val) => childPhone = val,
+   decoration: InputDecoration(
+  hintText: 'Çocuğun Telefon Numarası',
+  prefixIcon: Padding(
+    padding: EdgeInsets.only(left: 8), // Solda 8px boşluk
+    child: Icon(Icons.phone, size: 16, color: Colors.black),
+  ),
+  prefixIconConstraints: BoxConstraints(minHeight: 32, minWidth: 32), // minWidth artırıldı
+  filled: true,
+  fillColor: Color(0xFF8D6E63).withOpacity(0.15),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.black, width: 1.5),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(16),
+    borderSide: BorderSide(color: Colors.white, width: 2),
+  ),
+  contentPadding: EdgeInsets.zero,
+  isDense: true,
+  counterText: '',
+),
+    keyboardType: TextInputType.phone,
+    maxLength: 11,
+    style: TextStyle(fontSize: 13),
+  ),
+),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  label: const Text(
+                    'İptal',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
                     ),
-                    actions: <Widget>[
-                      TextButton(
-                        child: const Text('İptal', style: TextStyle(color: accentPurple)),
-                        onPressed: () { Navigator.of(context).pop(); },
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: accentPink,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
+                  ),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Color(0xFF6B5048),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.person_add, color: Colors.white),
+                  label: const Text('Ekle', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF6B5048),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onPressed: () async {
+                    String? errMsg = await addChild(
+                      childName: childName,
+                      childEmail: childEmail,
+                      childPassword: childPassword,
+                      childTc: childTc,
+                      childPhone: childPhone,
+                      firestore: _firestore,
+                    );
+                    if (errMsg == null) {
+                      List<Map<String, dynamic>> children = await fetchChildrenFromFirebase(_currentUserId!, _firestore);
+                      setState(() => _children = children);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Çocuk başarıyla eklendi!'),
+                          backgroundColor: accentPurple,
                         ),
-                        child: const Text('Ekle'),
-                        onPressed: () async {
-                          String? errMsg = await addChild(
-                            childName: childName,
-                            childEmail: childEmail,
-                            childPassword: childPassword,
-                            childTc: childTc,
-                            childPhone: childPhone,
-                            firestore: _firestore,
-                          );
-                          if (errMsg == null) {
-                            List<Map<String, dynamic>> children = await fetchChildrenFromFirebase(_currentUserId!, _firestore);
-                            setState(() => _children = children);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Çocuk başarıyla eklendi!')),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(errMsg)),
-                            );
-                          }
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(errMsg),
+                          backgroundColor: accentPink,
+                        ),
+                      );
+                    }
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  ),
+)
                   );
                 },
               );
             },
-            icon: const Icon(Icons.person_add, color: accentPink),
+            icon: const Icon(Icons.person_add, color: Colors.white),
             label: const Text('Yeni Çocuk Ekle'),
             style: ElevatedButton.styleFrom(
               minimumSize: const Size(double.infinity, 40),
-              backgroundColor: accentPurple,
+              backgroundColor: Colors.black,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -728,158 +1295,332 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             ),
           ),
         ),
-        Expanded(
-          child: Column(
-            children: [
-              if (_children.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(1.0),
-                  child: Center(
-                    child: Text(
-                      'Henüz eklenmiş bir çocuk yok.',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              else
+        HorizontalChildrenList(
+          children: _children,
+          refresh: () async {
+            List<Map<String, dynamic>> children = await fetchChildrenFromFirebase(_currentUserId!, _firestore);
+            setState(() => _children = children);
+          },
+          onDelete: (childDocId) => deleteChild(childDocId, _firestore),
+          onProfileImageUpdate: (childDocId) => addOrUpdateChildProfileImage(childDocId, _firestore),
+        ),
+        Text(
+          "Aile Kategorisi İçerikleri",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+        ),
+        Expanded(child: buildContentSplitForCategory("Aile", _userType, _firestore)),
+      ],
+    );
+  }
+Widget buildCocukSplitContentCard(
+    String category, String? userType, FirebaseFirestore firestore) {
+  return FutureBuilder<List<DocumentSnapshot>>(
+    future: _fetchAllContent(category, userType, firestore),
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final docs = snapshot.data ?? [];
+      if (docs.isEmpty) {
+        return const Center(child: Text("İçerik bulunamadı."));
+      }
+      // İlk iki içerik
+      final first = docs.isNotEmpty ? docs[0] : null;
+      final second = docs.length > 1 ? docs[1] : null;
+
+      final double cardWidth = MediaQuery.of(context).size.width * 0.96;
+      final double cardHeight = min(MediaQuery.of(context).size.height * 0.52, 400);
+
+      return Center(
+        child: Card(
+          elevation: 14,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+          color: Colors.white,
+          child: Container(
+            width: cardWidth,
+            height: cardHeight,
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                // Sol bölüm: İlk içerik
                 Expanded(
-  child: PaginatedChildrenList(
-    children: _children,
-    refresh: () async {
-      List<Map<String, dynamic>> children = await fetchChildrenFromFirebase(_currentUserId!, _firestore);
-      setState(() => _children = children);
-    },
-    onDelete: (childDocId) => deleteChild(childDocId, _firestore),
-    onProfileImageUpdate: (childDocId) => addOrUpdateChildProfileImage(childDocId, _firestore),
-  ),
-),
-// Hiç padding veya SizedBox koyma!
-Text(
-  "Aile Kategorisi İçerikleri",
-  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-),
-Expanded(child: buildContentBookForCategory("Aile", _userType, _firestore)),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget buildCocukPanel() {
-    return Column(
-      children: [
-        Text('Hoşgeldin Çocuk! (Kullanıcı ID: $_currentUserId)'),
-        if (_parentId != null)
-          FutureBuilder<DocumentSnapshot>(
-            future: _firestore.collection('users').doc(_parentId.toString()).get(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData)
-                return const CircularProgressIndicator();
-              final data = snapshot.data!.data() as Map<String, dynamic>?;
-              return Text(
-                  'Bağlı Olduğun Aile: ${data?['appcustomer_name'] ?? "Bilinmiyor"}');
-            },
-          ),
-        const SizedBox(height: 10),
-        const Text(
-          "Çocuk Kategorisi İçerikleri",
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        Expanded(child: buildContentBookForCategory("Çocuk", _userType, _firestore)),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final List<Widget> pages = [
-      buildAilePanel(),
-      SearchPage(),
-      NotificationsPage(),
-      ProfilePage(),
-      const SrocniyPage(),
-      ChatPage(),
-      DenemeSayfa(),
-    ];
-    return Scaffold(
-      backgroundColor: lightPurple,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Image.asset('assets/ruzgarplus.png', height: 50),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: accentPink,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                  child: first == null
+                      ? Center(child: Text("İlk içerik yok"))
+                      : Padding(
+                          padding: const EdgeInsets.only(right: 8), // Sağda daha az boşluk
+                          child: _fullImageTitleLinkSection(context, first),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        elevation: 2,
-                        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                ),
+                // İnce ayraç
+                Container(
+                  width: 1,
+                  height: double.infinity,
+                  decoration: BoxDecoration(
+                    color: accentPurple.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Sağ bölüm: İkinci içerik
+                Expanded(
+                  child: second == null
+                      ? Center(child: Text("İkinci içerik yok"))
+                      : Padding(
+                          padding: const EdgeInsets.only(left: 8), // Solda daha az boşluk
+                          child: _fullImageTitleLinkSection(context, second),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Widget buildCocukPanel() {
+  return Column(
+    children: [
+      
+      if (_parentId != null)
+        
+      const Padding(
+        padding: EdgeInsets.only(top: 8.0, bottom: 8.0),
+        child: Text(
+          "Sosyal İçerikler",
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 30),
+        ),
+      ),
+      Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: buildCocukSplitContentCard("çocuk", _userType, _firestore),
+        ),
+      ),
+    ],
+  );
+}
+  @override
+Widget build(BuildContext context) {
+  final List<Widget> pages = _userType == 'Cocuk'
+      ? [
+          buildCocukPanel(),
+          SearchPage(),
+          NotificationsPage(),
+          ProfilePage(),
+          const SrocniyPage(),
+          DenemeSayfa(),
+         
+        ]
+      : [
+          buildAilePanel(),
+          SearchPage(),
+          NotificationsPage(),
+          ProfilePage(),
+          const SrocniyPage(),
+          DenemeSayfa(),
+       
+        ];
+  return Scaffold(
+    backgroundColor: lightPurple,
+    body: SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Image.asset('assets/ruzgarplus5.png', height: 60),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                      onPressed: () {
-                        setState(() { _currentIndex = 5; });
-                      },
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text('Mesajlaşma'),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      elevation: 2,
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                     ),
+                  onPressed: () {
+  Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage()));
+},
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    label: const Text('Mesajlaşma'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: pages[_currentIndex]),
+        ],
+      ),
+    ),
+    bottomNavigationBar: Container(
+      width: MediaQuery.of(context).size.width,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4))
+        ],
+      ),
+      child: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        selectedItemColor: accentPink,
+        unselectedItemColor: accentPurple.withOpacity(0.5),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        type: BottomNavigationBarType.fixed,
+        showSelectedLabels: false,
+        showUnselectedLabels: false,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+            if (_currentIndex == 0 && _userType == 'Aile' && _currentUserId != null) {
+              fetchChildrenFromFirebase(_currentUserId!, _firestore).then((children) {
+                setState(() => _children = children);
+              });
+            }
+          });
+        },
+        items: [
+          BottomNavigationBarItem(
+            icon: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
                   ),
                 ],
               ),
+              child: Icon(Icons.home, color: Colors.black),
             ),
-            Expanded(child: pages[_currentIndex]),
-          ],
-        ),
-      ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.only(left: 20, right: 20, bottom: 30),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(30),
-            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4))],
+            label: '',
           ),
-          child: BottomNavigationBar(
-            currentIndex: _currentIndex,
-            selectedItemColor: accentPink,
-            unselectedItemColor: accentPurple.withOpacity(0.5),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            type: BottomNavigationBarType.fixed,
-            selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w400, fontSize: 14),
-            onTap: (index) {
-              setState(() {
-                _currentIndex = index;
-                if (_currentIndex == 0 && _userType == 'Aile' && _currentUserId != null) {
-                  fetchChildrenFromFirebase(_currentUserId!, _firestore).then((children) {
-                    setState(() => _children = children);
-                  });
-                }
-              });
-            },
-            items: const [
-              BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Ana Sayfa'),
-              BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Konum Bul'),
-              BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Uygulama Denetimi'),
-              BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
-              BottomNavigationBarItem(icon: Icon(Icons.warning_amber_rounded, color: accentPink), label: 'Acil Çağrı'),
-              BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Mesajlaşma'),
-              BottomNavigationBarItem(icon: Icon(Icons.hearing), label: 'Dinleme'),
-            ],
+          BottomNavigationBarItem(
+            icon: Container(
+           width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Image.asset(
+                'assets/ruzgarplusicon.png',
+                width: 20,
+                height: 20,
+                fit: BoxFit.contain,
+              ),
+            ),
+            label: '',
           ),
-        ),
+          BottomNavigationBarItem(
+            icon: Container(
+                width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(Icons.notifications, color: Colors.black),
+            ),
+            label: '',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+             width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(Icons.person, color: Colors.black),
+            ),
+            label: '',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(Icons.warning_amber_rounded, color: Colors.black),
+            ),
+            label: '',
+          ),
+          BottomNavigationBarItem(
+            icon: Container(
+                width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.brown, width: 2),
+                color: Color(0xFF8D6E63).withOpacity(0.15),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(Icons.hearing, color: Colors.black),
+            ),
+            label: '',
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

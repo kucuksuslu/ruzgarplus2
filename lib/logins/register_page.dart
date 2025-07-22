@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Renk paleti
+const Color kPrimaryPink = Color(0xFFFF1585);
+const Color kPrimaryPurple = Color(0xFF5E17EB);
+
 class CustomerRegisterPage extends StatefulWidget {
   const CustomerRegisterPage({Key? key}) : super(key: key);
 
@@ -73,7 +77,7 @@ class _CustomerRegisterPageState extends State<CustomerRegisterPage> {
           'parent_id': null,
           'created_at': FieldValue.serverTimestamp(),
           'begin_date': beginDate?.toIso8601String(),
-          'firebase_uid': user.uid, // İstersen UID de saklayabilirsin
+          'firebase_uid': user.uid,
         });
 
         setState(() {
@@ -115,79 +119,239 @@ class _CustomerRegisterPageState extends State<CustomerRegisterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Müşteri Kayıt'),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              if (errorMessage != null) ...[
-                Text(errorMessage!, style: const TextStyle(color: Colors.red)),
-                const SizedBox(height: 12),
-              ],
-              if (successMessage != null) ...[
-                Text(successMessage!, style: const TextStyle(color: Colors.green)),
-                const SizedBox(height: 12),
-              ],
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'İsim Soyisim'),
-                validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
+      // Arkaplanda görsel
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage("assets/denemes.jpg"), // görsel yolunu buraya ekle
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Container(
+          // gradient overlay (istenirse yumuşak bir renk efekti)
+          decoration: const BoxDecoration(
+          
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(22),
+              child: Center(
+                child: Card(
+                  elevation: 16,
+                  color: Colors.white.withOpacity(0.95),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircleAvatar(
+                            radius: 38,
+                            backgroundColor: kPrimaryPink.withOpacity(0.17),
+                            child: const Icon(Icons.person_add, size: 42, color: Colors.black),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Müşteri Kayıt',
+                            style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold, color: Colors.black),
+                          ),
+                          const SizedBox(height: 10),
+                          if (errorMessage != null) ...[
+                            Text(errorMessage!, style: TextStyle(color: kPrimaryPink, fontSize: 15, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                          ],
+                          if (successMessage != null) ...[
+                            Text(successMessage!, style: TextStyle(color: kPrimaryPurple, fontSize: 15, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 10),
+                          ],
+                          TextFormField(
+                            controller: nameController,
+                            decoration: InputDecoration(
+                              labelText: 'İsim Soyisim',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.person, color: Colors.brown),
+                              filled: true,
+                              fillColor: kPrimaryPink.withOpacity(0.09),
+                              labelStyle: const TextStyle(color: Colors.brown),
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: emailController,
+                            decoration: InputDecoration(
+                              labelText: 'E-posta',
+                              border: OutlineInputBorder(
+                               borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.email, color: Colors.brown),
+                              filled: true,
+                              fillColor: kPrimaryPink.withOpacity(0.09),
+                              labelStyle: const TextStyle(color: Colors.brown),
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
+                            keyboardType: TextInputType.emailAddress,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: tcController,
+                            decoration: InputDecoration(
+                              labelText: 'TC Kimlik No',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.credit_card, color: Colors.brown),
+                              filled: true,
+                              fillColor: kPrimaryPink.withOpacity(0.09),
+                              labelStyle: const TextStyle(color: Colors.brown),
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: phoneController,
+                            decoration: InputDecoration(
+                              labelText: 'Telefon',
+                              border: OutlineInputBorder(
+                               borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                               borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.phone, color: Colors.brown),
+                              filled: true,
+                              fillColor: kPrimaryPink.withOpacity(0.09),
+                              labelStyle: const TextStyle(color: Colors.brown),
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
+                            keyboardType: TextInputType.phone,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: passwordController,
+                            decoration: InputDecoration(
+                              labelText: 'Şifre',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                               borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                               borderRadius: BorderRadius.circular(78),
+                                borderSide: const BorderSide(color: Colors.brown, width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.lock, color: Colors.brown),
+                              filled: true,
+                              fillColor: kPrimaryPink.withOpacity(0.09),
+                              labelStyle: const TextStyle(color: Colors.brown),
+                            ),
+                            obscureText: true,
+                          ),
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: ElevatedButton.icon(
+                              icon: isLoading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      ))
+                                  : const Icon(Icons.person_add, color: Colors.white),
+                              label: Text(isLoading ? "Kaydediliyor..." : "Kaydet"),
+                              onPressed: isLoading
+                                  ? null
+                                  : () {
+                                      if (_formKey.currentState!.validate()) {
+                                        registerCustomer();
+                                      }
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.black,
+                                foregroundColor: Colors.white,
+                                textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                elevation: 6,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          // GERİ DÖN BUTONU
+                          SizedBox(
+                            width: double.infinity,
+                            height: 44,
+                            child: TextButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                              },
+                              icon: const Icon(Icons.arrow_back, color:  Colors.black),
+                              label: const Text(
+                                "Geri Dön",
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              style: TextButton.styleFrom(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                backgroundColor: kPrimaryPink.withOpacity(0.07),
+                                foregroundColor: kPrimaryPink,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
-              TextFormField(
-                controller: emailController,
-                decoration: const InputDecoration(labelText: 'E-posta'),
-                validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
-                keyboardType: TextInputType.emailAddress,
-              ),
-              TextFormField(
-                controller: tcController,
-                decoration: const InputDecoration(labelText: 'TC Kimlik No'),
-                validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
-              ),
-              TextFormField(
-                controller: phoneController,
-                decoration: const InputDecoration(labelText: 'Telefon'),
-                validator: (v) => v == null || v.isEmpty ? 'Zorunlu alan' : null,
-                keyboardType: TextInputType.phone,
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Başlangıç Tarihi: ${beginDate != null ? beginDate!.toLocal().toString().split(' ')[0] : ''}'),
-                trailing: const Icon(Icons.calendar_today),
-                onTap: () async {
-                  DateTime? picked = await showDatePicker(
-                    context: context,
-                    initialDate: beginDate ?? DateTime.now(),
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                  );
-                  if (picked != null) setState(() => beginDate = picked);
-                },
-              ),
-              TextFormField(
-                controller: passwordController,
-                decoration: const InputDecoration(labelText: 'Şifre'),
-                obscureText: true,
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton.icon(
-                icon: isLoading
-                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.person_add),
-                label: Text(isLoading ? "Kaydediliyor..." : "Kaydet"),
-                onPressed: isLoading
-                    ? null
-                    : () {
-                        if (_formKey.currentState!.validate()) {
-                          registerCustomer();
-                        }
-                      },
-              )
-            ],
+            ),
           ),
         ),
       ),

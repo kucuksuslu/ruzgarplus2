@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -47,13 +49,72 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
       _userId = prefs.getInt('user_id');
       _userType = prefs.getString('user_type');
     });
+    debugPrint('[_loadUserInfo] userId: $_userId, userType: $_userType');
   }
 
-  Future<void> _startWatchdog(Set<String> restrictedApps) async {
+
+Future<String?> getGooglePlayIconUrl(String packageName) async {
+  try {
+    final url = 'https://play.google.com/store/apps/details?id=$packageName';
+    final response = await http.get(Uri.parse(url), headers: {
+      // User-Agent eklemek önemli, bazen olmadan response farklı döner!
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+    });
+    debugPrint('[getGooglePlayIconUrl] Status code: ${response.statusCode}');
+    if (response.statusCode == 200) {
+      debugPrint('[getGooglePlayIconUrl] Response body (ilk 500): ${response.body.substring(0, response.body.length > 500 ? 500 : response.body.length)}');
+      // YENİ REGEXP!
+      final regExp = RegExp(
+        r'<meta property="og:image" content="([^"]+)"',
+        caseSensitive: false,
+      );
+      final match = regExp.firstMatch(response.body);
+      debugPrint('[getGooglePlayIconUrl] RegExp match: $match');
+      if (match != null && match.groupCount >= 1) {
+        String iconUrl = match.group(1)!;
+        debugPrint('[getGooglePlayIconUrl] Found iconUrl: $iconUrl');
+        return iconUrl;
+      } else {
+        debugPrint('[getGooglePlayIconUrl] Icon not found in HTML!');
+      }
+    } else {
+      debugPrint('[getGooglePlayIconUrl] HTTP status code not 200!');
+    }
+  } catch (e) {
+    debugPrint('[getGooglePlayIconUrl] Exception: $e');
+  }
+  return null;
+}
+
+  // --- YENİ: App icon provider (önce cihazda, yoksa Google Play) ---
+ Future<ImageProvider?> getAppIconProvider(String packageName) async {
+  try {
+    // Önce cihazdan çekmeyi dene
+    final Uint8List? iconBytes = await platform.invokeMethod<Uint8List>(
+      'getAppIcon',
+      {"packageName": packageName},
+    );
+    if (iconBytes != null) {
+      return MemoryImage(iconBytes);
+    }
+  } catch (e) {
+    debugPrint('[getAppIconProvider] Cihazdan ikon alınamadı: $e');
+    // ignore, aşağıda Google Play'den dene
+  }
+  // Cihazda yoksa Google Play'den çekmeyi dene
+  final iconUrl = await getGooglePlayIconUrl(packageName);
+  if (iconUrl != null) {
+    return NetworkImage(iconUrl);
+  }
+  return null;
+}
+
+  Future<void> _startWatchdog(Set<String> restrictedPackages) async {
     _watchdogTimer?.cancel();
     _watchdogTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       try {
         final List? appList = await platform.invokeMethod<List>('getUsageStats');
+        debugPrint('[_startWatchdog] appList: $appList');
         if (appList != null) {
           for (final item in appList) {
             if (item is Map) {
@@ -61,7 +122,8 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
               final int hours = int.tryParse(item['hours'].toString()) ?? 0;
               final int minutes = int.tryParse(item['minutes'].toString()) ?? 0;
               final bool isInForeground = (hours > 0 || minutes > 0);
-              if (restrictedApps.contains(packageName) && isInForeground) {
+              debugPrint('[_startWatchdog] packageName: $packageName, isInForeground: $isInForeground, restricted: ${restrictedPackages.contains(packageName)}');
+              if (restrictedPackages.contains(packageName) && isInForeground) {
                 _watchdogTimer?.cancel();
                 if (mounted) {
                   SystemNavigator.pop();
@@ -71,7 +133,9 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
             }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        debugPrint('[_startWatchdog] Error: $e');
+      }
     });
   }
 
@@ -85,42 +149,55 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
       final idParts = doc.id.split('_');
       final filter = idParts.sublist(1).join('_');
       final data = doc.data();
-      final stats = Map<String, dynamic>.from(data['stats'] ?? {});
+      final statsRaw = data['stats'];
+      Map<String, dynamic> stats = {};
+      if (statsRaw is Map) {
+        stats = Map<String, dynamic>.from(statsRaw);
+      } else if (statsRaw is List) {
+        for (var appEntry in statsRaw) {
+          if (appEntry is Map && appEntry['appName'] != null) {
+            stats[appEntry['appName']] = appEntry;
+          }
+        }
+      }
       final appCustomerName = data['appcustomer_name'] ?? "";
       List<dynamic> restrictedApps = [];
       if (data.containsKey('restricted_apps')) {
         restrictedApps = List<dynamic>.from(data['restricted_apps']);
-        // Eğer yeni yapıda ise (Map olarak), isimleri ayıkla:
         for (var item in restrictedApps) {
-          if (item is Map && item.containsKey('appName')) {
+          if (item is Map && item.containsKey('packageName')) {
+            allRestrictedPackages.add(item['packageName']);
+          } else if (item is Map && item.containsKey('appName')) {
             allRestrictedPackages.add(item['appName']);
           } else if (item is String) {
             allRestrictedPackages.add(item);
           }
         }
       }
-      stats.forEach((appName, statMap) {
+      stats.forEach((appNameKey, statMap) {
         final stat = Map<String, dynamic>.from(statMap ?? {});
         final int hours = stat['hours'] ?? 0;
         final int minutes = stat['minutes'] ?? 0;
         final int totalMinutes = (hours * 60) + minutes;
-        if (!filterStats.containsKey(filter)) {
-          filterStats[filter] = {};
-        }
-        // Kısıtlı mı?
+        final String packageName = stat['packageName'] ?? appNameKey;
+        final String appName = stat['appName'] ?? appNameKey;
+
         bool isRestricted = false;
-        // restrictedApps elemanları hem Map hem String olabilir
         if (restrictedApps.isNotEmpty) {
           isRestricted = restrictedApps.any((item) {
-            if (item is Map && item['appName'] == appName) return true;
-            if (item is String && item == appName) return true;
+            if (item is Map && item['packageName'] == packageName) return true;
+            if (item is Map && item['appName'] == packageName) return true;
+            if (item is String && item == packageName) return true;
             return false;
           });
         }
-        // Map'in içine yaz
-        if (!filterStats[filter]!.containsKey(appName)) {
-          filterStats[filter]![appName] = {
+        if (!filterStats.containsKey(filter)) {
+          filterStats[filter] = {};
+        }
+        if (!filterStats[filter]!.containsKey(packageName)) {
+          filterStats[filter]![packageName] = {
             'appName': appName,
+            'packageName': packageName,
             'hours': hours,
             'minutes': minutes,
             'totalMinutes': totalMinutes,
@@ -129,9 +206,9 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
             'appcustomer_name': appCustomerName,
           };
         } else {
-          filterStats[filter]![appName]['hours'] += hours;
-          filterStats[filter]![appName]['minutes'] += minutes;
-          filterStats[filter]![appName]['totalMinutes'] += totalMinutes;
+          filterStats[filter]![packageName]['hours'] += hours;
+          filterStats[filter]![packageName]['minutes'] += minutes;
+          filterStats[filter]![packageName]['totalMinutes'] += totalMinutes;
         }
       });
     }
@@ -150,10 +227,11 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
       statList.sort((a, b) => (b['totalMinutes'] as int).compareTo(a['totalMinutes'] as int));
       topStats[filter] = statList.take(10).toList().cast<Map<String, dynamic>>();
     });
+    debugPrint('[_processSnapshot] topStats: $topStats');
     return topStats;
   }
 
-  Future<void> _addRestriction(String docId, String appName, DateTime untilDate) async {
+  Future<void> _addRestriction(String docId, String packageName, DateTime untilDate, String appName) async {
     final docRef = FirebaseFirestore.instance.collection('user_usagestats').doc(docId);
     final doc = await docRef.get();
     if (!doc.exists) return;
@@ -163,13 +241,13 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
     if (data.containsKey('restricted_apps')) {
       restrictedApps = List<dynamic>.from(data['restricted_apps']);
     }
-    // Aynı uygulama varsa önce sil
     restrictedApps.removeWhere((item) =>
-      (item is Map && item['appName'] == appName) ||
-      (item is String && item == appName)
+        (item is Map && item['packageName'] == packageName) ||
+        (item is Map && item['appName'] == packageName) ||
+        (item is String && item == packageName)
     );
 
-    restrictedApps.add({'appName': appName, 'until': untilDate.toIso8601String()});
+    restrictedApps.add({'packageName': packageName, 'until': untilDate.toIso8601String()});
 
     await docRef.update({
       'restricted_apps': restrictedApps,
@@ -185,7 +263,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
     }
   }
 
-  Future<void> _removeRestriction(String docId, String appName) async {
+  Future<void> _removeRestriction(String docId, String packageName, String appName) async {
     final docRef = FirebaseFirestore.instance.collection('user_usagestats').doc(docId);
     final doc = await docRef.get();
     if (!doc.exists) return;
@@ -196,8 +274,9 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
       restrictedApps = List<dynamic>.from(data['restricted_apps']);
     }
     restrictedApps.removeWhere((item) =>
-      (item is Map && item['appName'] == appName) ||
-      (item is String && item == appName)
+        (item is Map && item['packageName'] == packageName) ||
+        (item is Map && item['appName'] == packageName) ||
+        (item is String && item == packageName)
     );
 
     await docRef.update({
@@ -214,22 +293,23 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
     }
   }
 
-  void _onRestrictionTap(String docId, String appName, bool isRestricted) async {
+  void _onRestrictionTap(String docId, String packageName, String appName, bool isRestricted) async {
+    debugPrint('[_onRestrictionTap] docId: $docId, packageName: $packageName, appName: $appName, isRestricted: $isRestricted');
     if (isRestricted) {
-      await _removeRestriction(docId, appName);
+      await _removeRestriction(docId, packageName, appName);
     } else {
-      // Tarih ve saat seçtir
       DateTime? selectedDateTime = await showDialog<DateTime>(
         context: context,
         builder: (context) => DateTimeRestrictionDialog(appName: appName),
       );
       if (selectedDateTime != null) {
-        await _addRestriction(docId, appName, selectedDateTime);
+        await _addRestriction(docId, packageName, selectedDateTime, appName);
       }
     }
   }
 
-  void _onAppTap(String docId, String appName, bool isRestricted) async {
+  void _onAppTap(String docId, String packageName, String appName, bool isRestricted) async {
+    debugPrint('[_onAppTap] docId: $docId, packageName: $packageName, appName: $appName, isRestricted: $isRestricted');
     if (isRestricted) {
       if (mounted) {
         showDialog(
@@ -261,7 +341,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: kPrimaryPurple,
+          backgroundColor: Colors.black,
           content: Text('$appName uygulaması açılabilir (kısıt yok).'),
         ),
       );
@@ -271,55 +351,117 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
   Widget _buildAppTile(Map<String, dynamic> stat) {
     final appCustomerName = stat['appcustomer_name'] ?? '';
     final appName = stat['appName'] ?? 'Bilinmeyen Uygulama';
+    final packageName = stat['packageName'] ?? appName;
     final hours = stat['hours'] ?? 0;
     final minutes = stat['minutes'] ?? 0;
     final docId = stat['docId'];
     final bool isRestricted = stat['restricted'] == true;
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: isRestricted ? kPrimaryPink.withOpacity(0.15) : kPrimaryPurple.withOpacity(0.11),
-        child: appCustomerName.isNotEmpty
-            ? Text(
-                appCustomerName[0].toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
+    debugPrint('[_buildAppTile] appName: $appName, packageName: $packageName, docId: $docId');
+  if (packageName == "com.miui.home" || appName.toLowerCase() == "home") {
+    return const SizedBox.shrink();
+  }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () {
+            _onAppTap(docId, packageName, appName, isRestricted);
+          },
+          child: Container(
+            constraints: const BoxConstraints(
+              maxHeight: 55,
+              maxWidth: 270,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFF8D6E63).withOpacity(0.15),
+              border: Border.all(
+                color: const Color(0xFF8D6E63),
+                width: 2,
+              ), 
+              borderRadius: BorderRadius.circular(24),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+            child: Row(
+              children: [
+                // --- Sadece ikon veya harf göster (YUVARLAK YOK!) ---
+                FutureBuilder<ImageProvider?>(
+                  future: getAppIconProvider(packageName),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasData && snapshot.data != null) {
+                      return Image(
+                        image: snapshot.data!,
+                        width: 36,
+                        height: 36,
+                        fit: BoxFit.contain,
+                      );
+                    } else {
+                      return Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        child: Text(
+                          appCustomerName.isNotEmpty
+                              ? appCustomerName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        ),
+                      );
+                    }
+                  },
                 ),
-              )
-            : Icon(Icons.apps, color: Colors.white),
-      ),
-      title: Text(
-        appName,
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: isRestricted ? FontWeight.bold : FontWeight.w600,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        appName,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        (hours > 0)
+                            ? 'Süre: $hours saat $minutes dakika'
+                            : 'Süre: $minutes dakika',
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.normal,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  icon: isRestricted
+                      ? const Icon(Icons.block, color: Colors.red)
+                      : const Icon(Icons.check_circle, color: Colors.brown),
+                  tooltip: isRestricted
+                      ? "Kısıtlamayı kaldır"
+                      : "Bu uygulamaya kısıtlama ekle",
+                  onPressed: () {
+                    _onRestrictionTap(docId, packageName, appName, isRestricted);
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      subtitle: Text(
-        (hours > 0)
-            ? 'Süre: $hours saat $minutes dakika'
-            : 'Süre: $minutes dakika',
-        style: TextStyle(
-          color: Colors.white,
-          fontWeight: isRestricted ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      trailing: IconButton(
-        icon: isRestricted
-            ? const Icon(Icons.block, color: Colors.white)
-            : const Icon(Icons.check_circle, color: Colors.white),
-        tooltip: isRestricted
-            ? "Kısıtlamayı kaldır"
-            : "Bu uygulamaya kısıtlama ekle",
-        onPressed: () {
-          _onRestrictionTap(docId, appName, isRestricted);
-        },
-      ),
-      onTap: () {
-        _onAppTap(docId, appName, isRestricted);
-      },
     );
   }
 
@@ -335,11 +477,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
       ),
       child: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [kPrimaryPurple.withOpacity(0.93), kPrimaryPink.withOpacity(0.92)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(22),
         ),
         child: Padding(
@@ -348,12 +486,12 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
-                '${customerName}${filter}',
+                '$customerName$filter',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Colors.black,
                   letterSpacing: 0.7,
                 ),
               ),
@@ -371,10 +509,11 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
     return Scaffold(
       backgroundColor: const Color(0xFFF4F2FC),
       appBar: AppBar(
-        backgroundColor: kPrimaryPink,
+        iconTheme: IconThemeData(color: Colors.white),
+        backgroundColor: Colors.black,
         elevation: 0,
         title: const Text(
-          'Filtrelere Göre En Çok Kullanılan 7 Uygulama',
+          'Ziyaret Edilen Uygulamalar',
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 19),
         ),
         centerTitle: true,
@@ -391,6 +530,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
                       margin: const EdgeInsets.symmetric(vertical: 18, horizontal: 18),
                       decoration: BoxDecoration(
                         color: Colors.white,
+                        border: Border.all(color: Colors.brown, width: 2),
                         borderRadius: BorderRadius.circular(18),
                         boxShadow: [
                           BoxShadow(
@@ -404,8 +544,8 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
                         style: const TextStyle(color: kPrimaryPurple, fontWeight: FontWeight.bold),
                         decoration: InputDecoration(
                           labelText: 'Filtre adına göre ara...',
-                          labelStyle: TextStyle(color: kPrimaryPurple.withOpacity(0.8)),
-                          prefixIcon: Icon(Icons.search, color: kPrimaryPink),
+                          labelStyle: TextStyle(color: Colors.brown.withOpacity(0.8)),
+                          prefixIcon: Icon(Icons.search, color: Colors.brown),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.all(16),
                         ),
@@ -423,11 +563,9 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
                             .where('parent_id', isEqualTo: _userId)
                             .snapshots(),
                         builder: (context, snapshot) {
-                          print('[DEBUG] StreamBuilder snapshot.hasData: ${snapshot.hasData}'
-                              ', doc length: ${snapshot.data?.docs.length ?? 'null'}'
-                              ', _userId: $_userId');
+                          debugPrint('[StreamBuilder] hasError: ${snapshot.hasError}, hasData: ${snapshot.hasData}, doc length: ${snapshot.data?.docs.length}, _userId: $_userId');
                           if (snapshot.hasError) {
-                            return const Center(child: Text("Bir hata oluştu!", style: TextStyle(color: Colors.white)));
+                            return const Center(child: Text("Bir hata oluştu!", style: TextStyle(color: Colors.black)));
                           }
                           if (!snapshot.hasData) {
                             return const Center(child: CircularProgressIndicator());
@@ -441,7 +579,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
                                   .toList();
 
                           if (filtersToShow.isEmpty) {
-                            return const Center(child: Text("Kayıt bulunamadı.", style: TextStyle(color: Colors.white)));
+                            return const Center(child: Text("Kayıt bulunamadı.", style: TextStyle(color: Colors.black)));
                           }
 
                           return ListView.builder(
@@ -460,7 +598,7 @@ class _NotificationsPageState extends State<NotificationsPage> with WidgetsBindi
               : const Center(
                   child: Text(
                     "Sadece Aile kullanıcıları uygulama istatistiklerini görebilir.",
-                    style: TextStyle(fontSize: 17, color: kPrimaryPurple, fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 17, color: Colors.black, fontWeight: FontWeight.bold),
                   ),
                 ),
     );

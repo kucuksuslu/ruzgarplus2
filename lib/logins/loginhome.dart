@@ -13,98 +13,137 @@ class loginHome extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          // TAM EKRAN ARKA PLAN GÖRSELİ
           Positioned.fill(
             child: Image.asset(
-              'assets/denes9.png',
-              fit: BoxFit.fill,
+              'assets/arkaplanresim.png',
+              fit: BoxFit.contain,
+              alignment: Alignment.center,
             ),
           ),
-          // MERKEZDEKİ BUTONLAR VE LOGO
           Center(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24.0),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center, // Ortala
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
-                  const SizedBox(height: 140),
-                  // Animasyonlu Giriş Yap Butonu
+                  const SizedBox(height: 10),
+                  // Animasyonlu Giriş Yap Butonu (Aynı tasarımda!)
                   SizedBox(
-                    width: 180, // BUTON ENİNİ DARALT
+                    width: 180,
+                    height: 48,
                     child: _AnimatedSlideButton(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) => const LoginPage()),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          foregroundColor: primaryColor,
-                          shadowColor: accentColor.withOpacity(0.01),
-                          elevation: 0,
-                          minimumSize: const Size(0, 44), // Boyu dar tut
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            side: BorderSide(color: primaryColor, width: 2),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: CustomPaint(
+                              size: const Size(double.infinity, 48),
+                              painter: DiagonalSplitPainter(),
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(vertical: 8), // Daha dar
-                          textStyle: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        child: Text(
-                          'Giriş Yap',
-                          style: TextStyle(
-                            color: primaryColor, // Kenar rengiyle aynı
-                            fontWeight: FontWeight.bold,
+                          TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (context) => const LoginPage()),
+                              );
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                              foregroundColor: primaryColor,
+                              minimumSize: const Size(0, 44),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              textStyle: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            child: const Text(
+                              'Giriş Yap',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.1,
+                                shadows: [
+                                  Shadow(
+                                    blurRadius: 8,
+                                    color: Colors.white,
+                                    offset: Offset(0, 0),
+                                  )
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Animasyonlu Üye Ol Butonu
+                  // Animasyonlu Üye Ol Butonu (Aynı tasarımda!)
                   SizedBox(
-                    width: 180, // BUTON ENİNİ DARALT
+                    width: 180,
+                    height: 48,
                     child: _AnimatedSlideButton(
                       delay: 230,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (context) =>
-                                    const CustomerRegisterPage()),
-                          );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: accentColor, // Yazı ve icon rengi
-                          side: BorderSide(color: accentColor, width: 2),
-                          minimumSize: const Size(0, 44), // Boyu dar tut
-                          padding: const EdgeInsets.symmetric(vertical: 8), // Daha dar
-                          shape: RoundedRectangleBorder(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          ClipRRect(
                             borderRadius: BorderRadius.circular(12),
+                            child: CustomPaint(
+                              size: const Size(double.infinity, 48),
+                              painter: DiagonalSplitPainter(),
+                            ),
                           ),
-                          textStyle: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                          TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const CustomerRegisterPage(),
+                                ),
+                              );
+                            },
+                            style: TextButton.styleFrom(
+                              backgroundColor: Colors.transparent,
+                              foregroundColor: accentColor,
+                              minimumSize: const Size(0, 44),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              textStyle: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            child: const Text(
+                              'Üye Ol',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.1,
+                                shadows: [
+                                  Shadow(
+                                    blurRadius: 8,
+                                    color: Colors.white,
+                                    offset: Offset(0, 0),
+                                  )
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                        child: Text(
-                          'Üye Ol',
-                          style: TextStyle(
-                            
-                            
-                            color: accentColor, // Kenar rengiyle aynı
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        ],
                       ),
                     ),
                   ),
+                   const SizedBox(height: 20),
                 ],
               ),
             ),
@@ -163,4 +202,49 @@ class _AnimatedSlideButtonState extends State<_AnimatedSlideButton>
       ),
     );
   }
+}
+
+// ================== DİAGONAL SPLIT PAINTER (EĞİK BÖLMELİ) ======================
+class DiagonalSplitPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Sol üstten sağ alta eğik şekilde iki alanı doldur
+    final paintLeft = Paint()
+      ..color = const Color(0xFF795548).withOpacity(0.8); // Kahverengi
+    final paintRight = Paint()
+      ..color = const Color(0xFFD7CCC8); // bej
+
+    // Sol bölge (üst sol, alt sol, çizgiye kadar)
+    final pathLeft = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width * 0.7, 0)
+      ..lineTo(size.width * 0.3, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(pathLeft, paintLeft);
+
+    // Sağ bölge (üst sağ, alt sağ, çizgiye kadar)
+    final pathRight = Path()
+      ..moveTo(size.width * 0.7, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(size.width * 0.3, size.height)
+      ..close();
+    canvas.drawPath(pathRight, paintRight);
+
+    // Eğik bölme çizgisi (parlak beyaz)
+    final slashPaint = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..strokeWidth = 5
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2)
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(size.width * 0.7, 0),
+      Offset(size.width * 0.3, size.height),
+      slashPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

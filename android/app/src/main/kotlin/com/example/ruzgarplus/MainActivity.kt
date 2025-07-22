@@ -17,6 +17,9 @@ import android.util.Log
 import android.Manifest
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
 
@@ -47,7 +50,120 @@ class MainActivity : FlutterActivity() {
 
         // Uygulama açılır açılmaz izinleri kontrol et ve iste
         ensureMicrophonePermissionsIfNeeded()
+         // uygulama resim alma 
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+    .setMethodCallHandler { call, result ->
+        when (call.method) {
+       "getAppIcon" -> {
+    val packageName = call.argument<String>("packageName")
+    Log.d("GET_APP_ICON", "İkon alınmak istenen package: $packageName")
+    try {
+        val pm = packageManager
+        val icon = pm.getApplicationIcon(packageName!!)
+        Log.d("GET_APP_ICON", "Application icon bulundu: $packageName (${icon.javaClass.simpleName})")
+        val drawable = icon
+        val bitmap = when (drawable) {
+            is BitmapDrawable -> drawable.bitmap
+            is android.graphics.drawable.AdaptiveIconDrawable -> {
+                val width = drawable.intrinsicWidth
+                val height = drawable.intrinsicHeight
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
+                bitmap
+            }
+            else -> null
+        }
+        if (bitmap != null) {
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            result.success(stream.toByteArray())
+            Log.d("GET_APP_ICON", "Bitmap başarıyla döndü: $packageName")
+        } else {
+            Log.e("GET_APP_ICON", "Drawable bitmap değil: $packageName (${icon.javaClass.simpleName})")
+            result.success(null)
+        }
+    } catch (e: Exception) {
+        Log.e("GET_APP_ICON", "Hata oluştu: $packageName (${e.javaClass.simpleName}): ${e.message}", e)
+        result.success(null)
+    }
+}
 
+            // Yeni yöntem: uygulama adı (label) ile package name bul ve ikon döndür
+            "getAppIconFromLabel" -> {
+                val appLabelRaw = call.argument<String>("appLabel") ?: ""
+                val appLabel = appLabelRaw.trim().lowercase()
+                try {
+                    val pm = packageManager
+                    val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                    var foundPackageName: String? = null
+
+                    // 1. Tam eşleşme (küçük/büyük harf ve boşluk duyarsız)
+                    for (app in apps) {
+                        val label = pm.getApplicationLabel(app).toString().trim().lowercase()
+                        if (label == appLabel) {
+                            foundPackageName = app.packageName
+                            break
+                        }
+                    }
+
+                    // 2. Boşlukları kaldırarak tam eşleşme
+                    if (foundPackageName == null) {
+                        val appLabelNoSpace = appLabel.replace("\\s".toRegex(), "")
+                        for (app in apps) {
+                            val label = pm.getApplicationLabel(app).toString().trim().lowercase()
+                            val labelNoSpace = label.replace("\\s".toRegex(), "")
+                            if (labelNoSpace == appLabelNoSpace) {
+                                foundPackageName = app.packageName
+                                break
+                            }
+                        }
+                    }
+
+                    // 3. Kısmi eşleşme (içinde geçiyorsa)
+                    if (foundPackageName == null) {
+                        for (app in apps) {
+                            val label = pm.getApplicationLabel(app).toString().trim().lowercase()
+                            if (label.contains(appLabel)) {
+                                foundPackageName = app.packageName
+                                break
+                            }
+                        }
+                    }
+
+                    // 4. Boşlukları kaldırıp kısmi eşleşme
+                    if (foundPackageName == null) {
+                        val appLabelNoSpace = appLabel.replace("\\s".toRegex(), "")
+                        for (app in apps) {
+                            val label = pm.getApplicationLabel(app).toString().trim().lowercase()
+                            val labelNoSpace = label.replace("\\s".toRegex(), "")
+                            if (labelNoSpace.contains(appLabelNoSpace)) {
+                                foundPackageName = app.packageName
+                                break
+                            }
+                        }
+                    }
+
+                    if (foundPackageName != null) {
+                        val icon = pm.getApplicationIcon(foundPackageName)
+                        val bitmap = (icon as BitmapDrawable).bitmap
+                        val stream = ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                        result.success(stream.toByteArray())
+                    } else {
+                        // Debug için: logcat'e uygulama adlarını yaz
+                        val allLabels = apps.map { pm.getApplicationLabel(it).toString() + " [${it.packageName}]" }
+                        android.util.Log.d("APP_ICON_DEBUG", "NOT FOUND: $appLabelRaw. Device apps: $allLabels")
+                        result.success(null)
+                    }
+                } catch (e: Exception) {
+                    result.success(null)
+                }
+            }
+            // Diğer methodlar burada devam edebilir...
+        }
+    }
         // OVERLAY KANALI
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, OVERLAY_CHANNEL).setMethodCallHandler { call, result ->
             Log.d("OverlayChannel", "Overlay channel method: ${call.method}")

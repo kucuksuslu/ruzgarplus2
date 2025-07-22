@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
+import 'package:google_fonts/google_fonts.dart';
 
 const Color kPrimaryPink = Color(0xFFFF1585);
 const Color kPrimaryPurple = Color(0xFF5E17EB);
@@ -52,7 +53,6 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
     if (userId == null) return;
 
     List<Map<String, dynamic>> users = [];
-    // Aile ise çocuk user_id'lerini, çocuk ise ailesini ekle
     if (userType == "Aile") {
       final childrenQuery = FirebaseFirestore.instance
           .collection('users')
@@ -104,7 +104,6 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
 
   void _listenAnyRoomActive() {
     if (_currentUserId == null) return;
-    // Kendi veya ilişkililerle aktif odaları dinle
     List<String> listenIds = [];
     if (_userType == "Aile") {
       listenIds = _chatUsers.map((e) => e['id'].toString()).toList();
@@ -128,7 +127,7 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
     if (_currentUserId == null || _selectedUserId == null) return;
     final userId = _currentUserId!;
     final otherId = _selectedUserId!;
-   final roomId = "${userId}_room";
+    final roomId = "${userId}_room";
 
     _subscription?.cancel();
 
@@ -143,7 +142,6 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
       final status = data['status'] as String? ?? '';
       final roomID = data['roomID'] as String? ?? '';
 
-      // Rolü belirle: Odayı başlatan broadcaster, diğeri audience
       String role = (roomID.split("_").last.trim() == userId.toString())
           ? "audience"
           : "broadcaster";
@@ -162,7 +160,6 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
     final userId = _currentUserId!;
     final otherId = _selectedUserId!;
     final roomId = "${userId}_room";
-    print("FLUTTER userType: $_userType");
     const MethodChannel channel = MethodChannel('com.example.ruzgarplus/agora_service');
     try {
       await channel.invokeMethod('startAgoraListening', {
@@ -171,9 +168,7 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
         "role": 'audience',
         "otherUserId": otherId,
         "userType":_userType,
-      
       });
-      print("FLUTTER userType: $_userType");
       _decreaseBalanceOnStart();
     } catch (e) {}
   }
@@ -206,47 +201,155 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
     } catch (e) {}
   }
 
-  Future<void> _saveRoomToFirebase(BuildContext context) async {
-    if (_currentUserId == null || _selectedUserId == null) {
-      setState(() {
-        _debugText = "Kullanıcı ID'leri null, oda kaydedilemiyor!";
-      });
-      return;
-    }
-    final userId = _currentUserId!;
-    final otherId = _selectedUserId!;
-    final roomId = "${userId}_room";
-
-    // SADECE TEK ODA KAYDI!
-    await FirebaseFirestore.instance.collection('active_audio_rooms').doc(roomId).set({
-      "roomID": roomId,
-      "userID": userId.toString(),
-      "otherUserId": otherId,
-      "status": "active",
-      "createdAt": FieldValue.serverTimestamp(),
-      "activeAt": FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
+Future<void> _saveRoomToFirebase(BuildContext context) async {
+  if (_currentUserId == null || _selectedUserId == null) {
     setState(() {
-      _debugText = "Oda kaydı oluşturuldu, Agora başlatılıyor!";
+      _debugText = "Kullanıcı ID'leri null, oda kaydedilemiyor!";
     });
-
-    // --- ROL BELİRLEME ---
-    // Kullanıcı tipi "Aile" ise, daima dinleyici (audience) olmalı. Yayıncı çocuk olacak.
-    String myRole = "broadcaster";
-    if (_userType == "Aile") {
-      myRole = "audience";
-    } else if (_userType != "Aile") {
-      myRole = "broadcaster";
-    }
-    await _startNativeAgoraListening(context, role: myRole);
-
-    setState(() {
-      _debugText += "\nAgora başlatıldı (role: $myRole)";
-    });
-
-    await _sendLiveBroadcasterRequest();
+    return;
   }
+
+  // 1) Kullanıcı aktif mi kontrol et
+  final userDoc = await FirebaseFirestore.instance
+      .collection('users')
+      .doc(_selectedUserId)
+      .get();
+
+  final lastActiveTimestamp = userDoc.data()?['last_active'];
+
+  if (lastActiveTimestamp == null) {
+    _showNotActiveDialog(context);
+    return;
+  }
+
+  DateTime lastActive;
+  if (lastActiveTimestamp is Timestamp) {
+    lastActive = lastActiveTimestamp.toDate();
+  } else if (lastActiveTimestamp is int) {
+    lastActive = DateTime.fromMillisecondsSinceEpoch(lastActiveTimestamp);
+  } else {
+    _showNotActiveDialog(context);
+    return;
+  }
+
+  final now = DateTime.now();
+  final diff = now.difference(lastActive).inSeconds;
+
+  if (diff > 10) {
+    _showNotActiveDialog(context);
+    return;
+  }
+
+  // --- Aktif değilse return, aktifse devam ---
+  final userId = _currentUserId!;
+  final otherId = _selectedUserId!;
+  final roomId = "${userId}_room";
+
+  await FirebaseFirestore.instance.collection('active_audio_rooms').doc(roomId).set({
+    "roomID": roomId,
+    "userID": userId.toString(),
+    "otherUserId": otherId,
+    "status": "active",
+    "createdAt": FieldValue.serverTimestamp(),
+    "activeAt": FieldValue.serverTimestamp(),
+  }, SetOptions(merge: true));
+
+  setState(() {
+    _debugText = "Oda kaydı oluşturuldu, Agora başlatılıyor!";
+  });
+
+  String myRole = "broadcaster";
+  if (_userType == "Aile") {
+    myRole = "audience";
+  } else if (_userType != "Aile") {
+    myRole = "broadcaster";
+  }
+  await _startNativeAgoraListening(context, role: myRole);
+
+  setState(() {
+    _debugText += "\nAgora başlatıldı (role: $myRole)";
+  });
+
+  await _sendLiveBroadcasterRequest();
+}
+
+void _showNotActiveDialog(BuildContext context) {
+showDialog(
+  context: context,
+  barrierDismissible: true,
+  builder: (ctx) => AlertDialog(
+    backgroundColor: Colors.white,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+    ),
+    contentPadding: const EdgeInsets.symmetric(vertical: 28, horizontal: 22),
+    titlePadding: const EdgeInsets.only(top: 22, left: 22, right: 22, bottom: 0),
+    title: Center(
+      child: Text(
+        'Kullanıcı Aktif Değil',
+        style: TextStyle(
+          color: Colors.red[700],
+          fontWeight: FontWeight.w700,
+          fontSize: 20,
+          letterSpacing: 0.2,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    ),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.12),
+            shape: BoxShape.circle,
+          ),
+          padding: const EdgeInsets.all(12),
+          child: const Icon(
+            Icons.info_outline_rounded,
+            color: Colors.red,
+            size: 36,
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'İstediğiniz kullanıcı şu an aktif değildir!\nLütfen daha sonra tekrar deneyin.',
+          style: TextStyle(
+            fontSize: 16,
+            color: Colors.black87,
+            height: 1.4,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(ctx).pop(),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.red[600],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+        ),
+        child: const Text(
+          'Tamam',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    ],
+  ),
+);
+  setState(() {
+    _debugText = "İstediğiniz kullanıcı şu an aktif değildir!";
+  });
+}
 
   Future<void> _sendLiveBroadcasterRequest() async {
     if (_currentUserId == null || _selectedUserId == null) {
@@ -258,18 +361,15 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
     final userId = _currentUserId!.toString();
     final otherId = _selectedUserId!;
     final userTypes= 'Çocuk';
-    
-      
 
-   final roomId = "${userId}_room";
+    final roomId = "${userId}_room";
     String role = "broadcaster";
-     print("userType ${userTypes}");
     final payload = {
       "sender_id": userId,
       "receiver_id": otherId,
       "room_id": roomId,
       "role": role,
-       "userType": userTypes,
+      "userType": userTypes,
     };
 
     setState(() {
@@ -278,16 +378,15 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
 
     try {
       final response = await http.post(
-        Uri.parse("http://192.168.1.196:8000/api/live-broadcaster"),
-        headers: {"Content-Type": "application/json"},
+        Uri.parse("http://crm.ruzgarnet.site/api/sesbildirim"),
+          headers: {
+      'Authorization': 'Basic cnV6Z2FybmV0Oksucy5zLjUxNTE1MQ==',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
         body: jsonEncode(payload),
       );
-      print("YANIT STATUS: ${response.statusCode}");
-      print("YANIT HEADERS: ${response.headers}");
-      print("YANIT BODY RAW: ${response.body.substring(0, 200)}");
-    } catch (e) {
-      print("HATA: $e");
-    }
+    } catch (e) {}
   }
 
   Future<void> _decreaseBalanceOnStart() async {
@@ -318,11 +417,10 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: kPrimaryPink.withOpacity(0.04),
       appBar: AppBar(
-        backgroundColor: kPrimaryPurple,
+        backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         title: const Text('Dinleme Ekranı'),
         elevation: 5,
@@ -352,114 +450,36 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // --- Modern Frekans Animasyonu ---
-                  const SizedBox(height: 6),
                   Card(
-                    color: Colors.blue[50],
+                    color: Colors.transparent,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(22),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 6),
-                      child: ListeningTripleWave(isActive: isListening),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(18),
+                        child: Image.asset(
+                          "assets/frekans.png",
+                          width: 186,
+                          height: 56,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // --- Modern "Dinlemeyi Başlat" Butonu ---
-                  ElevatedButton.icon(
-                    icon: Icon(
-                      isListening ? Icons.hearing : Icons.play_arrow_rounded,
-                      size: 28,
-                      color: Colors.white,
-                    ),
-                    label: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
-                      child: Text(
-                        isListening ? 'Dinleme Aktif' : 'Dinlemeyi Başlat',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          letterSpacing: 0.1,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isListening ? kWaveBlue : kPrimaryPurple,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      minimumSize: const Size.fromHeight(54),
-                      shadowColor: kPrimaryPurple.withOpacity(0.20),
-                      elevation: 6,
-                    ),
-                    onPressed: isListening
-                        ? null // Zaten aktifken tekrar başlatma!
-                        : () => _saveRoomToFirebase(context),
+
+                  // --- Modern "Dinlemeyi Başlat" Butonu (Animasyonlu ve Özel) ---
+                  AnimatedListenButton(
+                    isListening: isListening,
+                    onPressed: () => _saveRoomToFirebase(context),
+                    
                   ),
-                  const SizedBox(height: 18),
-                  // --- Diğer Butonlar ve Bilgiler ---
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.account_balance_wallet_rounded, color: Colors.indigo[600]),
-                      const SizedBox(width: 6),
-                      Text("Bakiye: ",
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 17,
-                              color: Colors.indigo[700])),
-                      Text(_userMoney.toStringAsFixed(2),
-                          style: TextStyle(
-                              fontSize: 17,
-                              color: _userMoney > 0 ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.w600)),
-                      const SizedBox(width: 10),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text("Yükle"),
-                        onPressed: _increaseBalance,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: kPrimaryPink,
-                          side: BorderSide(color: kPrimaryPink, width: 1.6),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          textStyle: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 22),
-                  DropdownButtonFormField<String>(
-                    value: _selectedUserId,
-                    items: _chatUsers
-                        .map<DropdownMenuItem<String>>((user) => DropdownMenuItem<String>(
-                              value: user['id'],
-                              child: Text(user['name'] ?? user['id']),
-                            ))
-                        .toList(),
-                    onChanged: (v) {
-                      setState(() {
-                        _selectedUserId = v;
-                        _listenRoomStatus();
-                      });
-                    },
-                    decoration: InputDecoration(
-                      labelText: _userType == "Aile"
-                          ? "Çocuk Seç (user_id)"
-                          : "Aile Seç (user_id)",
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      filled: true,
-                      fillColor: Colors.indigo.withOpacity(0.045),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
+
+                  // --- Yayın/Dinlemeyi Durdur Butonu ---
                   ElevatedButton.icon(
                     icon: const Icon(Icons.stop, size: 22, color: Colors.white),
                     label: const Padding(
@@ -486,36 +506,121 @@ class _DenemeSayfaState extends State<DenemeSayfa> with SingleTickerProviderStat
                       _stopNativeAgoraListening(context);
                     },
                   ),
-                  const SizedBox(height: 30),
-                  Text(
-                    "DEBUG LOG",
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.indigo[800],
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(13),
-                    decoration: BoxDecoration(
-                      color: Colors.indigo[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.indigo.withOpacity(0.14)),
-                    ),
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.vertical,
-                      child: Text(
-                        _debugText,
-                        style: const TextStyle(
-                          fontFamily: "monospace",
-                          fontSize: 13.5,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ),
-                  ),
+                  const SizedBox(height: 18),
+
+                  // --- Çocuk/Aile Seçme ve Bakiye Aynı Dikdörtgen Kutuda ---
+     Center(
+  child: Container(
+  width: MediaQuery.of(context).size.width * 0.98,
+    constraints: BoxConstraints(maxWidth: 500),
+
+    decoration: BoxDecoration(
+      color: Colors.brown.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(
+        color: Colors.brown,
+        width: 1.8,
+      ),
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Çocuk/Aile seçme - YUVARLAK BORDER
+        DropdownButtonFormField<String>(
+          value: _selectedUserId,
+          items: _chatUsers
+              .map<DropdownMenuItem<String>>((user) => DropdownMenuItem<String>(
+                    value: user['id'],
+                    child: Text(user['name'] ?? user['id']),
+                  ))
+              .toList(),
+          onChanged: (v) {
+            setState(() {
+              _selectedUserId = v;
+              _listenRoomStatus();
+            });
+          },
+          decoration: InputDecoration(
+            labelText: _userType == "Aile"
+                ? "Çocuk Seç (user_id)"
+                : "Aile Seç (user_id)",
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(22),
+              borderSide: BorderSide(
+                color: Colors.brown,
+                width: 1.4,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(22),
+              borderSide: BorderSide(
+                color: Colors.brown,
+                width: 1.4,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(22),
+              borderSide: BorderSide(
+                color: Colors.brown.shade700,
+                width: 2,
+              ),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+          dropdownColor: Colors.white,
+        ),
+        const SizedBox(height: 14),
+        // Bakiye kısmı (aynı şekilde)
+        SingleChildScrollView(
+  scrollDirection: Axis.horizontal,
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Icon(Icons.account_balance_wallet_rounded, color: Colors.black),
+      const SizedBox(width: 6),
+      Text(
+        "Bakiye: ",
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 17,
+          color: Colors.black,
+        ),
+      ),
+      Text(
+        _userMoney.toStringAsFixed(2),
+        style: TextStyle(
+          fontSize: 17,
+          color: _userMoney > 0 ? Colors.blue[600] : Colors.red,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(width: 10),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.add, size: 18),
+        label: const Text("Yükle"),
+        onPressed: _increaseBalance,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.green[500],
+          side: BorderSide(color: Colors.green, width: 2),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
+    ],
+  ),
+)
+      ],
+    ),
+  ),
+),
+                  const SizedBox(height: 18),
                 ],
               ),
             ),
@@ -626,4 +731,95 @@ class TripleWavePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant TripleWavePainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.isActive != isActive;
+}
+
+/// --- ANİMASYONLU Dinlemeyi Başlat Butonu ---
+class AnimatedListenButton extends StatefulWidget {
+  final bool isListening;
+  final VoidCallback onPressed;
+  const AnimatedListenButton({super.key, required this.isListening, required this.onPressed});
+
+  @override
+  State<AnimatedListenButton> createState() => _AnimatedListenButtonState();
+}
+class _AnimatedListenButtonState extends State<AnimatedListenButton> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
+    _scaleAnimation = Tween<double>(begin: 0.90, end: 1.15).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _scaleAnimation,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _scaleAnimation.value,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: Colors.brown.shade200,
+                width: 3.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: kPrimaryPurple.withOpacity(0.12),
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ElevatedButton.icon(
+              icon: Icon(
+                widget.isListening ? Icons.hearing : Icons.play_arrow_rounded,
+                size: 28,
+                color: Colors.brown[700],
+              ),
+              label: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+                child: Text(
+                  widget.isListening ? 'Dinleme Aktif' : 'Dinlemeyi Başlat',
+               style: TextStyle(
+  fontWeight: FontWeight.w500,
+  fontSize: 19,
+  letterSpacing: 0.5,
+  color: Colors.black,
+),
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                minimumSize: const Size.fromHeight(54),
+              ),
+              onPressed: widget.isListening ? null : widget.onPressed,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

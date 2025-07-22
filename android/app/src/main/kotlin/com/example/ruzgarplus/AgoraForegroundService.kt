@@ -244,8 +244,7 @@ class AgoraForegroundService : Service() {
                 agoraEngine?.muteLocalAudioStream(true)
                 Log.d("AgoraService", "Audience: Mikrofon KAPALI (muteLocalAudioStream(true))")
             }
-            agoraEngine?.adjustPlaybackSignalVolume(400)
-            agoraEngine?.adjustRecordingSignalVolume(400)
+      
             agoraEngine?.setEnableSpeakerphone(true)
             Log.d("AgoraService", "Hoparlör aktif edildi (setEnableSpeakerphone(true))")
 

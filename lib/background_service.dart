@@ -18,13 +18,12 @@ import 'package:geolocator/geolocator.dart';
 import 'dart:math';
 
 const String serverIp = "192.168.1.196";
-const String wifiStatusEndpoint = "http://$serverIp:8000/api/fcm-pong";
+const String wifiStatusEndpoint = "http://crm.ruzgarnet.site/api/fcm-pong";
 const String sendAlertEndpoint = "http://$serverIp:8000/api/send-alert";
 
 var _beautyEnvStarted = false;
 String? _lastActiveRoomID;
 
-const MethodChannel _agoraChannel = MethodChannel('com.example.ruzgarplus/agora_service');
 const String agoraAppId = "8109382d3cde4ef881a8fb846237f2ed";
 const String notificationSmallIcon = 'ic_stat_notify';
 
@@ -147,10 +146,12 @@ Future<void> showLocalNotification(String title, String body) async {
 
 Future<void> playAlarmSoundTwice() async {
   final player = AudioPlayer();
-  print('[DEBUG] [ALARM] Alarm sesi başlatılıyor (2 defa çalacak)...');
+  print('[DEBUG] [ALARM] Alarm sesi başlatılıyor (2 defa, her biri önceki bitince başlayacak)...');
   for (int i = 0; i < 2; i++) {
+    await player.stop(); // O anda bir ses çalıyorsa durdur
     await player.play(AssetSource('alarm.mp3'), volume: 1.0, mode: PlayerMode.lowLatency);
-    await Future.delayed(const Duration(milliseconds: 1200));
+    // alarm.mp3'in süresini bilmiyorsan, onComplete dinleyebilirsin:
+    await player.onPlayerComplete.first;
   }
   await player.dispose();
   print('[DEBUG] [ALARM] Alarm sesi çalma işlemi bitti.');
@@ -243,7 +244,8 @@ Future<void> logMostUsedApps(int userId, int? parentId) async {
     final String? appCustomerName = prefs.getString('appcustomer_name');
     debugPrint("[logMostUsedApps] appCustomerName: $appCustomerName");
 
-    Map<String, Map<String, int>> stats = {};
+    // Burada hem packageName (gerçek paket adı) hem appName (görsel ad) kaydediyoruz
+    Map<String, Map<String, dynamic>> stats = {};
     for (var info in usageStats) {
       dynamic value = info.totalTimeInForeground ?? 0;
 
@@ -262,11 +264,19 @@ Future<void> logMostUsedApps(int userId, int? parentId) async {
 
       if (ms == 0) continue;
 
-      final appName = guessAppName(info.packageName ?? "");
+      final packageName = info.packageName ?? "";
+      final appName = guessAppName(packageName);
       final hourMin = usageMsToHourMin(ms);
-      stats[appName] = hourMin;
+
+      // Her uygulama için hem packageName hem appName hem de süreleri kaydet
+      stats[packageName] = {
+        'appName': appName,
+        'packageName': packageName,
+        'hours': hourMin['hours'],
+        'minutes': hourMin['minutes'],
+      };
       debugPrint(
-        "[logMostUsedApps] App: $appName, Foreground(ms): $ms, HourMin: $hourMin",
+        "[logMostUsedApps] App: $appName, Package: $packageName, Foreground(ms): $ms, HourMin: $hourMin",
       );
     }
     String docId = "$userId";
@@ -444,17 +454,25 @@ double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
 
 Future<void> checkChildrenAreaAlerts(int userId) async {
   try {
+    print("[DEBUG] checkChildrenAreaAlerts called for userId=$userId");
     final prefs = await SharedPreferences.getInstance();
     String? userType = prefs.getString('user_type');
-    if (userType != 'Aile') return;
+    print("[DEBUG] userType: $userType");
+    if (userType != 'Aile') {
+      print("[DEBUG] Kullanıcı tipi Aile değil, fonksiyon terkedildi.");
+      return;
+    }
 
     final childrenQuery = await FirebaseFirestore.instance
         .collection('user_locations')
         .where('parent_id', isEqualTo: userId)
-        .where('user_type', isEqualTo: 'Çocuk')
+        .where('user_type', isEqualTo: 'Cocuk')
         .get();
 
+    print("[DEBUG] childrenQuery.docs.length: ${childrenQuery.docs.length}");
+
     if (childrenQuery.docs.isEmpty) {
+      print("[DEBUG] Çocuk bulunamadı, fonksiyon terkedildi.");
       return;
     }
 
@@ -463,13 +481,19 @@ Future<void> checkChildrenAreaAlerts(int userId) async {
         .doc(userId.toString())
         .get();
 
+    print("[DEBUG] areaLimitDoc.exists: ${areaLimitDoc.exists}");
+
     if (!areaLimitDoc.exists) {
+      print("[DEBUG] Alan sınırı bulunamadı, fonksiyon terkedildi.");
       return;
     }
     final areaData = areaLimitDoc.data()!;
     final double centerLat = (areaData['center_lat'] as num).toDouble();
     final double centerLng = (areaData['center_lng'] as num).toDouble();
     final double radiusM = (areaData['radius_m'] as num).toDouble();
+
+    print(
+        "[DEBUG] Alan merkezi: ($centerLat, $centerLng), radius: $radiusM metre");
 
     List<String> outsideNames = [];
     for (var doc in childrenQuery.docs) {
@@ -478,16 +502,28 @@ Future<void> checkChildrenAreaAlerts(int userId) async {
       final double lng = (data['longitude'] as num).toDouble();
       final String name = data['appcustomer_name'] ?? 'Bilinmeyen';
       final double distance = calculateDistance(lat, lng, centerLat, centerLng);
+      print(
+          "[DEBUG] Çocuk: $name, Konum: ($lat, $lng), Merkeze uzaklık: $distance metre");
+
       if (distance > radiusM) {
+        print("[DEBUG] $name alan dışında!");
         outsideNames.add(name);
+      } else {
+        print("[DEBUG] $name alan içinde.");
       }
     }
 
     if (outsideNames.isNotEmpty) {
-      final String msg = "Alan dışında olan çocuk(lar): ${outsideNames.join(', ')}";
+      final String msg =
+          "Alan dışında olan kullanıcılarınız: ${outsideNames.join(', ')}";
+      print("[DEBUG] Bildirim gösteriliyor: $msg");
       await showLocalNotification("Uyarı", msg);
+    } else {
+      print("[DEBUG] Tüm kullaıcılarınız alan içinde.");
     }
-  } catch (e, stack) {}
+  } catch (e, stack) {
+    print("[DEBUG] Hata: $e\n$stack");
+  }
 }
 
 Future<void> handleInternetTestMessage(RemoteMessage message) async {
@@ -533,7 +569,11 @@ Future<void> handlePingPong(RemoteMessage message, {required String userId, requ
     try {
       final response = await http.post(
         Uri.parse(wifiStatusEndpoint),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+      'Authorization': 'Basic cnV6Z2FybmV0Oksucy5zLjUxNTE1MQ==',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
         body: jsonEncode({
           'user_id': userId,
           'requestId': requestId,
@@ -541,26 +581,10 @@ Future<void> handlePingPong(RemoteMessage message, {required String userId, requ
         }),
       );
 
-      await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-        'timestamp': FieldValue.serverTimestamp(),
-        'note': '[DEBUG][PONG] POST atıldı',
-        'http_status': response.statusCode,
-        'http_body': response.body,
-        'userId': userId,
-        'requestId': requestId,
-        'handler': isBackground ? 'background' : 'foreground',
-      });
+     
 
       if (response.statusCode != 200) {
-        await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-          'timestamp': FieldValue.serverTimestamp(),
-          'note': 'wifi-status API HATASI (FCM PONG)',
-          'http_status': response.statusCode,
-          'http_body': response.body,
-          'user_id': userId,
-          'requestId': requestId,
-          'handler': isBackground ? 'background' : 'foreground',
-        });
+      
       }
       await FirebaseFirestore.instance
           .collection('users')
@@ -689,38 +713,11 @@ Future<void> fcmBackgroundHandler(RemoteMessage message) async {
     final String otherUserId = message.data['otherUserId'] ?? '';
     // Sadece doğru kullanıcıda başlat
     if (roomId.isNotEmpty && userId.isNotEmpty && otherUserId.isNotEmpty && userId == otherUserId) {
-      try {
-        const platform = MethodChannel('com.example.ruzgarplus/agora_service');
-        await platform.invokeMethod('startAgoraService', {
-          'roomId': roomId,
-          'userId': userId,
-          'otherUserId': otherUserId,
-          'role': 'broadcaster',
-        });
-        print('[DEBUG][AGORA][FCM] AgoraForegroundService başlatıldı!');
-      } catch (e) {
-        print('[DEBUG][AGORA][FCM][ERROR] Service başlatılamadı: $e');
-      }
+     
 
-      await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-        'timestamp': FieldValue.serverTimestamp(),
-        'note': '[DEBUG][AGORA][BACKGROUND] Agora başlatıldı (broadcaster)',
-        'roomId': roomId,
-        'userId': userId,
-        'role': 'broadcaster',
-        'otherUserId': otherUserId,
-        'message': message.data,
-      });
+     
     } else {
-      await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-        'timestamp': FieldValue.serverTimestamp(),
-        'note': '[DEBUG][AGORA][BACKGROUND] Agora başlatılmadı, userId eşleşmedi',
-        'roomId': roomId,
-        'userId': userId,
-        'role': role,
-        'otherUserId': otherUserId,
-        'message': message.data,
-      });
+    
     }
     return;
   }
@@ -805,33 +802,7 @@ void listenBroadcastRoomsForSelf() async {
       print('[DEBUG][SNAPSHOT] Oda bulundu: roomId=$roomId, userID=$userID, status=$status, otherUserId=$otherUserId, myUserId=$myUserId');
 
       if (status == 'active') {
-        print('[DEBUG][MATCH] status=active, oda başlatılıyor...');
-        try {
-          await _agoraChannel.invokeMethod('startAgoraListening', {
-            "roomId": roomId,
-            "userId": myUserId,
-            "role": "broadcaster",  // veya ihtiyaca göre "audience"
-            "otherUserId": userID,
-          });
-          print('[DEBUG][AGORA] startAgoraListening başarılı!');
-          await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-            'timestamp': FieldValue.serverTimestamp(),
-            'note': '[DEBUG][AGORA][AUTO_BROADCAST] Oda match, broadcaster başlatıldı',
-            'roomId': roomId,
-            'myUserId': myUserId,
-            'userID': userID,
-          });
-        } catch (e, st) {
-          print('[DEBUG][AGORA][ERROR] startAgoraListening başarısız: $e');
-          await FirebaseFirestore.instance.collection('flutter_background_logs').add({
-            'timestamp': FieldValue.serverTimestamp(),
-            'note': '[DEBUG][AGORA][AUTO_BROADCAST][ERROR] Başlatılamadı',
-            'roomId': roomId,
-            'error': e.toString(),
-            'myUserId': myUserId,
-            'userID': userID,
-          });
-        }
+     
       } else {
         print('[DEBUG][SKIP] Oda aktif değil, atlandı.');
       }
@@ -863,7 +834,18 @@ Future<void> onStart(ServiceInstance service) async {
   FirebaseMessaging.onBackgroundMessage(fcmBackgroundHandler);
   setupForegroundFCMHandler();
 
-  Timer.periodic(const Duration(minutes: 2), (_) async {
+  // --- HEM ARKA PLANDA HEM ÖN PLANDA last_active güncelle ---
+  Timer.periodic(const Duration(seconds: 10), (_) async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('user_id');
+    if (userId != null) {
+      await FirebaseFirestore.instance.collection('users').doc(userId.toString())
+        .set({'last_active': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      print('[DEBUG][HEARTBEAT] last_active güncellendi: $userId');
+    }
+  });
+
+  Timer.periodic(const Duration(minutes: 3), (_) async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
     int? parentId = prefs.getInt('parent_id');

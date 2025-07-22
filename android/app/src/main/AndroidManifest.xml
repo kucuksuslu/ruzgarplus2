@@ -14,10 +14,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.SEND_SMS"/>
+
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
-    <uses-permission android:name="android.permission.READ_SMS"/>
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <uses-permission android:name="android.permission.CALL_PHONE"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
@@ -42,9 +42,14 @@
         android:icon="@mipmap/ic_launcher"
         tools:replace="android:label">
 
+        <!-- FCM için default notification channel metadata EKLENDİ -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyCjWVvkxdaS-y9OBFpGqlallnHc6WrLk0M" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="default_channel_id" />
 
         <activity
             android:name="org.jitsi.meet.sdk.JitsiMeetActivity"
@@ -109,13 +114,14 @@
             android:name=".OverlayBlockerService"
             android:exported="false"
             android:enabled="true" />
-<service
-    android:name=".MyFirebaseMessagingService"
-    android:exported="false">
-    <intent-filter>
-        <action android:name="com.google.firebase.MESSAGING_EVENT" />
-    </intent-filter>
-</service>
+
+        <service
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <!-- Firebase Messaging SERVİSİ! -->
         <service

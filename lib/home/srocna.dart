@@ -486,8 +486,12 @@ class _SrocniyPageState extends State<SrocniyPage> {
     if (selected != null && selected.isNotEmpty) {
       try {
         final response = await http.post(
-          Uri.parse('http://192.168.1.196:8000/api/send-alert'),
-          headers: {'Content-Type': 'application/json'},
+          Uri.parse('http://crm.ruzgarnet.site/api/sendappalert'),
+              headers: {
+      'Authorization': 'Basic cnV6Z2FybmV0Oksucy5zLjUxNTE1MQ==',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
           body: jsonEncode({
             "trigger_user_id": _userId,
             "target_user_id": selected['user_id'],
@@ -515,47 +519,54 @@ class _SrocniyPageState extends State<SrocniyPage> {
   }
 
   Widget _buildEmergencyCallButtons() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          ElevatedButton.icon(
-            icon: const Icon(Icons.local_hospital, color: Colors.white),
-            label: const Text("112", style: TextStyle(color: Colors.white)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kPrimaryPink,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 4,
-            ),
-            onPressed: () => launchUrl(Uri.parse("tel:112")),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.local_police, color: Colors.white),
-            label: const Text("155", style: TextStyle(color: Colors.white)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kPrimaryPurple,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 4,
-            ),
-            onPressed: () => launchUrl(Uri.parse("tel:155")),
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.security, color: Colors.white),
-            label: const Text("156", style: TextStyle(color: Colors.white)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 4,
-            ),
-            onPressed: () => launchUrl(Uri.parse("tel:156")),
-          ),
-        ],
+return Padding(
+  padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+  children: [
+  for (final item in [
+    {'icon': '🏥', 'label': '112', 'url': "tel:112"},
+    {'icon': '👮‍♀️', 'label': '155', 'url': "tel:155"},
+    {'icon': '🚔', 'label': '156', 'url': "tel:156"},
+  ])
+    Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.red, width: 1.5),
       ),
-    );
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          shadowColor: Colors.transparent,
+          shape: const CircleBorder(
+            side: BorderSide(color: Colors.red, width: 1.5),
+          ),
+          elevation: 0,
+          padding: EdgeInsets.zero,
+        ),
+        onPressed: () => launchUrl(Uri.parse(item['url'] as String)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            item['icon'] is IconData
+              ? Icon(item['icon'] as IconData, color: Colors.black, size: 28)
+              : Text(item['icon'] as String, style: TextStyle(fontSize: 28)),
+            SizedBox(height: 4),
+            Text(
+              item['label'] as String,
+              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    ),
+]
+
+  ),
+);
   }
 
   Widget _numberListSection() {
@@ -570,32 +581,56 @@ class _SrocniyPageState extends State<SrocniyPage> {
               title: Text(
                 "Acil Durum Numaraları",
                 style: TextStyle(
-                  color: kPrimaryPurple,
+                  color: Colors.black,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              trailing: IconButton(
-                icon: Icon(Icons.add, color: kPrimaryPink),
-                onPressed: _addNumber,
-              ),
+          trailing: InkWell(
+  onTap: _addNumber,
+  borderRadius: BorderRadius.circular(32),
+  child: CircleAvatar(
+    backgroundColor: Colors.black, // veya istediğin renk
+    radius: 20,
+    child: Icon(Icons.add, color: Colors.white),
+  ),
+),
             ),
             ..._emergencyNumbers.asMap().entries.map((entry) {
               final idx = entry.key;
               final num = entry.value;
               return ListTile(
-                title: Text(num, style: TextStyle(color: kPrimaryPurple)),
+                title: Text(num, style: TextStyle(color: Colors.red)),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(Icons.edit, color: kPrimaryPink),
-                      onPressed: () => _editNumber(idx),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _removeNumber(idx),
-                    ),
-                  ],
+                 children: [
+  InkWell(
+    onTap: () => _editNumber(idx),
+    borderRadius: BorderRadius.circular(32),
+    child: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.black, // Siyah arkaplan
+        shape: BoxShape.circle,
+      ),
+      child: Icon(Icons.edit, color: Colors.white), // Beyaz ikon
+    ),
+  ),
+  SizedBox(width: 8), // Butonlar arası boşluk isteğe bağlı
+  InkWell(
+    onTap: () => _removeNumber(idx),
+    borderRadius: BorderRadius.circular(32),
+    child: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.black, // Siyah arkaplan
+        shape: BoxShape.circle,
+      ),
+      child: Icon(Icons.delete, color: Colors.white), // Beyaz ikon
+    ),
+  ),
+],
                 ),
               );
             })
@@ -605,44 +640,70 @@ class _SrocniyPageState extends State<SrocniyPage> {
     );
   }
 
-  Widget _modernActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback? onPressed,
-    bool loading = false,
-  }) {
-    return ElevatedButton.icon(
-      icon: Icon(icon, size: 32, color: Colors.white),
-      label: loading
-          ? Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14.0),
-              child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-            )
-          : Text(label, style: const TextStyle(fontSize: 18, color: Colors.white)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 8,
-      ),
-      onPressed: loading ? null : onPressed,
-    );
-  }
+Widget _modernActionButton({
+  required String label,
+  required Color color,
+  required VoidCallback? onPressed,
+  bool loading = false,
+  double borderRadius = 16,
+  Widget? iconWidget, // <-- yeni parametre
+}) {
+  return ElevatedButton.icon(
+    icon: iconWidget ??
+        Icon(Icons.circle, size: 28, color: Colors.black), // default icon
+    label: loading
+        ? Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10.0),
+            child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2)),
+          )
+        : Text(
+            label,
+            style: const TextStyle(fontSize: 16, color: Colors.black),
+          ),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: color,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(borderRadius)),
+      elevation: 8,
+    ),
+    onPressed: loading ? null : onPressed,
+  );
+}
+
 
   @override
+
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: kPrimaryPurple.withOpacity(0.05),
-      appBar: AppBar(
-        title: const Text("Acil Durumlar"),
-        backgroundColor: kPrimaryPurple,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        shape: const RoundedRectangleBorder(
+      appBar: PreferredSize(
+      preferredSize: const Size.fromHeight(60),
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+          colors: [
+  Color(0xFF7B5E57), // Daha koyu kahverengi
+  Color(0xFFD7CCC8), // Açık bej-kahve
+],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
           borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
         ),
+        child: AppBar(
+          title: const Text("Acil Durum Çağrıları"),
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.black,
+          elevation: 0,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(bottom: Radius.circular(22)),
+          ),
+        ),
       ),
+    ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
@@ -659,7 +720,7 @@ class _SrocniyPageState extends State<SrocniyPage> {
                     height: 200,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: kPrimaryPink.withOpacity(0.35), width: 3),
+                      border: Border.all(color: Colors.brown, width: 3),
                       boxShadow: [
                         BoxShadow(
                           color: kPrimaryPurple.withOpacity(0.07),
@@ -700,39 +761,62 @@ class _SrocniyPageState extends State<SrocniyPage> {
                 ),
               _buildEmergencyCallButtons(),
               _numberListSection(),
+
+              // --- Elliptic Action Buttons inside a Card ---
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 24),
-                child: Column(
-                  children: [
-                    _modernActionButton(
-                        icon: Icons.sms,
-                        label: 'Konumu SMS Gönder',
-                        color: kPrimaryPink,
-                        loading: _isSendingSms,
-                        onPressed: _handleSendLocationSms),
-                    const SizedBox(height: 16),
-                    _modernActionButton(
-                        icon: Icons.phone,
-                        label: 'Konumu WhatsApp\'tan Gönder',
-                        color: Colors.green,
-                        loading: _isSendingWhatsapp,
-                        onPressed: _handleSendWhatsapp),
-                    const SizedBox(height: 16),
-                    _modernActionButton(
-                        icon: Icons.warning_amber_rounded,
-                        label: 'ACİL DURUM! Hepsini Ara',
-                        color: kPrimaryPurple,
-                        loading: _isCalling,
-                        onPressed: _handleEmergencyCall),
-                    const SizedBox(height: 16),
-                    _modernActionButton(
-                        icon: Icons.alarm,
-                        label: 'ACİL DURUM ALARMI!',
-                        color: Colors.red,
-                        loading: _isSendingAlarm,
-                        onPressed: _handleAlarmButton
+                child: Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(32),
+                  ),
+                  color: Colors.white,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 12),
+                    child: Column(
+                      children: [
+                        _modernActionButton(
+                         iconWidget: Icon(Icons.sms,color:Colors.white),
+                          label: 'Konumu SMS Gönder',
+                          color: Color(0xFF8D6E63).withOpacity(0.15),
+                          loading: _isSendingSms,
+                          onPressed: _handleSendLocationSms,
+                          borderRadius: 32, // <-- eklendi!
+                        ),
+                        const SizedBox(height: 16),
+                     _modernActionButton(
+  label: 'Konumu WhatsApp\'tan Gönder',
+  color: Color(0xFF8D6E63).withOpacity(0.15),
+  loading: _isSendingWhatsapp,
+  onPressed: _handleSendWhatsapp,
+  borderRadius: 32,
+  iconWidget: Image.asset(
+    'assets/bariswhatsapp.png',
+    width: 28,
+    height: 28,
+  ),
+),
+                        const SizedBox(height: 16),
+                        _modernActionButton(
+                           iconWidget: Icon(Icons.warning_amber_rounded,color:Colors.red),
+                          label: 'ACİL DURUM! Hepsini Ara',
+                          color: Color(0xFF8D6E63).withOpacity(0.15),
+                          loading: _isCalling,
+                          onPressed: _handleEmergencyCall,
+                          borderRadius: 32,
+                        ),
+                        const SizedBox(height: 16),
+                        _modernActionButton(
+                           iconWidget: Icon(Icons.alarm,color:Colors.white),
+                          label: 'ACİL DURUM ALARMI!',
+                           color: Colors.red,
+                          loading: _isSendingAlarm,
+                          onPressed: _handleAlarmButton,
+                          borderRadius: 32,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],

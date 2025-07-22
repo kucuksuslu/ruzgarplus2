@@ -168,8 +168,12 @@ class _ChatPageState extends State<ChatPage> {
     try {
       debugPrint('[DEBUG] API çağrısı başlatılıyor');
       final response = await http.post(
-        Uri.parse("http://192.168.1.196:8000/api/send-message-notification"),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse("http://crm.ruzgarnet.site/api/sendMessageNotification"),
+            headers: {
+      'Authorization': 'Basic cnV6Z2FybmV0Oksucy5zLjUxNTE1MQ==',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
         body: jsonEncode({
           'sender_id': _userId,
           'receiver_id': _selectedUserId,
@@ -179,15 +183,13 @@ class _ChatPageState extends State<ChatPage> {
       );
       debugPrint('[DEBUG] API yanıtı: ${response.statusCode} - ${response.body}');
       if (!mounted) return;
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Mesaj bildirimi API başarılı: ${response.body}')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('API hata: ${response.statusCode} - ${response.body}')),
-        );
-      }
+   if (response.statusCode == 200) {
+  debugPrint('[DEBUG] API yanıtı: ${response.statusCode} - ${response.body}');
+ 
+} else {
+  debugPrint('[DEBUG] API yanıtı: ${response.statusCode} - ${response.body}');
+  
+}
     } catch (e) {
       debugPrint('[DEBUG] API hata: $e');
       if (!mounted) return;
@@ -269,9 +271,9 @@ class _ChatPageState extends State<ChatPage> {
         : null;
 
     return Scaffold(
-      backgroundColor: kPrimaryPurple.withOpacity(0.04),
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: kPrimaryPurple,
+        backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         title: const Text("Sohbet"),
         elevation: 2,
@@ -280,289 +282,257 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            // Kişi seçimi
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 10.0),
-              child: Row(
-                children: [
-                  const Text(
-                    "Kişi seç: ",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: kPrimaryPurple),
-                  ),
-                  const SizedBox(width: 10),
-                  _chatUsers.isEmpty
-                      ? const Text("Sohbet için kişi yok.", style: TextStyle(color: Colors.grey))
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: kPrimaryPink.withOpacity(0.10),
-                            border: Border.all(color: kPrimaryPink, width: 1.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              value: dropdownValue,
-                              icon: Icon(Icons.arrow_drop_down, color: kPrimaryPurple),
-                              items: _chatUsers
-                                  .map<DropdownMenuItem<int>>((u) => DropdownMenuItem<int>(
-                                        value: u['id'],
-                                        child: Text(
-                                          u['appcustomer_name'] ?? "Kullanıcı",
-                                          style: TextStyle(
-                                            color: kPrimaryPurple,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ))
-                                  .toList(),
-                              onChanged: (val) {
-                                if (val != null) setState(() => _selectedUserId = val);
-                              },
-                            ),
-                          ),
-                        ),
-                ],
+            // --- ARKAPLAN RESMİ ---
+            Positioned.fill(
+              child: Image.asset(
+                "assets/denemes3.png",
+                fit: BoxFit.cover,
               ),
             ),
-            // Mesajlar
-            Expanded(
-              child: (roomId == null)
-                  ? const Center(
-                      child: Text(
-                        "Sohbet için kişi yok.",
-                        style: TextStyle(color: Colors.grey, fontSize: 16),
+            // --- ÜSTTEKİ ANA CHAT WIDGET'I ---
+            Column(
+              children: [
+                // Kişi seçimi
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 10.0),
+                  child: Row(
+                    children: [
+                      const Text(
+                        "Kişi seç: ",
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
                       ),
-                    )
-                  : Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: kPrimaryPurple.withOpacity(0.05),
-                            blurRadius: 18,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      child: StreamBuilder<QuerySnapshot>(
-                        stream: _firestore
-                            .collection('chats')
-                            .doc(roomId)
-                            .collection('messages')
-                            .orderBy('timestamp', descending: true)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          final docs = snapshot.data!.docs.toList();
-
-                          // Bildirim: yeni mesaj bana geldiyse ve daha önce gösterilmediyse
-                          if (docs.isNotEmpty) {
-                            final latest = docs.first;
-                            final data = latest.data() as Map<String, dynamic>;
-                            final isMe = data['sender_id'] == _userId;
-                            final isMineToRead = data['receiver_id'] == _userId;
-                            if (!isMe && isMineToRead && !_shownMessageDocIds.contains(data['doc'])) {
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text("${data['sender_name']} sana mesaj gönderdi: ${data['text']}"),
-                                      backgroundColor: kPrimaryPink,
-                                      duration: const Duration(seconds: 3),
-                                    ),
-                                  );
-                                }
-                              });
-                              _shownMessageDocIds.add(data['doc']);
-                            }
-                          }
-
-                          // Mesajları okundu olarak işaretle!
-                          for (final doc in docs) {
-                            final data = doc.data() as Map<String, dynamic>;
-                            final isMe = data['sender_id'] == _userId;
-                            final isRead = data['is_read'] == true;
-                            if (!isMe && !isRead && data['receiver_id'] == _userId) {
-                              _markMessageAsRead(roomId, data['doc']);
-                            }
-                          }
-
-                          return ListView.builder(
-                            reverse: true,
-                            itemCount: docs.length,
-                            itemBuilder: (context, index) {
-                              final data = docs[index].data() as Map<String, dynamic>;
-                              final senderId = data['sender_id'];
-                              final text = data['text'] ?? '';
-                              final isMe = senderId == _userId;
-                              final isRead = data['is_read'] == true;
-                              final senderName = data['sender_name'] ?? '';
-                              return Align(
-                                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 14),
-                                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                                  decoration: BoxDecoration(
-                                    gradient: isMe
-                                        ? LinearGradient(
-                                            colors: [
-                                              kPrimaryPurple.withOpacity(0.92),
-                                              kPrimaryPink.withOpacity(0.74)
-                                            ],
-                                            begin: Alignment.topRight,
-                                            end: Alignment.bottomLeft,
-                                          )
-                                        : LinearGradient(
-                                            colors: [
-                                              Colors.grey[200]!,
-                                              Colors.grey[100]!,
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                          ),
-                                    borderRadius: BorderRadius.only(
-                                      topLeft: const Radius.circular(18),
-                                      topRight: const Radius.circular(18),
-                                      bottomLeft: isMe
-                                          ? const Radius.circular(18)
-                                          : const Radius.circular(4),
-                                      bottomRight: isMe
-                                          ? const Radius.circular(4)
-                                          : const Radius.circular(18),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: isMe
-                                            ? kPrimaryPurple.withOpacity(0.07)
-                                            : Colors.grey.withOpacity(0.04),
-                                        blurRadius: 7,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: isMe
-                                        ? CrossAxisAlignment.end
-                                        : CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            senderName,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                              color: isMe ? Colors.white : kPrimaryPurple,
-                                            ),
-                                          ),
-                                          if (isMe)
-                                            Padding(
-                                              padding: const EdgeInsets.only(left: 7.0),
-                                              child: Icon(
-                                                Icons.done_all,
-                                                color: isRead
-                                                    ? Colors.blue // Mavi tik
-                                                    : Colors.white70, // Gri tik
-                                                size: 18,
+                      const SizedBox(width: 10),
+                      _chatUsers.isEmpty
+                          ? const Text("Sohbet için kişi yok.", style: TextStyle(color: Colors.black))
+                          : Container(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFBDA8AC),
+                                    Color(0xFFF8F6F6),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                border: Border.all(color: Colors.black, width: 2),
+                                borderRadius: BorderRadius.circular(38),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  value: dropdownValue,
+                                  icon: Icon(Icons.arrow_drop_down, color: Colors.black),
+                                  items: _chatUsers
+                                      .map<DropdownMenuItem<int>>((u) => DropdownMenuItem<int>(
+                                            value: u['id'],
+                                            child: Text(
+                                              u['appcustomer_name'] ?? "Kullanıcı",
+                                              style: TextStyle(
+                                                color: Colors.black,
+                                                fontWeight: FontWeight.bold,
                                               ),
                                             ),
+                                          ))
+                                      .toList(),
+                                  onChanged: (val) {
+                                    if (val != null) setState(() => _selectedUserId = val);
+                                  },
+                                ),
+                              ),
+                            ),
+                    ],
+                  ),
+                ),
+                // Mesajlar
+                Expanded(
+                  child: (roomId == null)
+                      ? const Center(
+                          child: Text(
+                            "Sohbet için kişi yok.",
+                            style: TextStyle(color: Colors.black, fontSize: 16),
+                          ),
+                        )
+                      : Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: kPrimaryPurple.withOpacity(0.05),
+                                blurRadius: 18,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          child: StreamBuilder<QuerySnapshot>(
+                            stream: _firestore
+                                .collection('chats')
+                                .doc(roomId)
+                                .collection('messages')
+                                .orderBy('timestamp', descending: true)
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (!snapshot.hasData) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+                              final docs = snapshot.data!.docs.toList();
+
+                              return ListView.builder(
+                                reverse: true,
+                                itemCount: docs.length,
+                                itemBuilder: (context, index) {
+                                  final data = docs[index].data() as Map<String, dynamic>;
+                                  final senderId = data['sender_id'];
+                                  final receiverId = data['receiver_id'];
+                                  final text = data['text'] ?? '';
+                                  final isMe = senderId == _userId;
+                                  final isRead = data['is_read'] == true;
+                                  final senderName = data['sender_name'] ?? '';
+                                  final docId = data['doc'] ?? docs[index].id;
+
+                                  // Mesajı okundu olarak işaretle (sadece alıcıysak, okundu değilse)
+                                  if (receiverId == _userId && !isRead && !_shownMessageDocIds.contains(docId)) {
+                                    _shownMessageDocIds.add(docId);
+                                    _markMessageAsRead(roomId, docId);
+                                  }
+
+                                  return Align(
+                                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                                    child: Container(
+                                      margin: const EdgeInsets.symmetric(vertical: 7, horizontal: 14),
+                                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0x9F120000),
+                                        borderRadius: BorderRadius.circular(38),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.07),
+                                            blurRadius: 7,
+                                            offset: const Offset(0, 2),
+                                          ),
                                         ],
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        text,
-                                        style: TextStyle(
-                                          fontSize: 15.5,
-                                          color: isMe ? Colors.white : kPrimaryPurple,
-                                        ),
+                                      child: Column(
+                                        crossAxisAlignment: isMe
+                                            ? CrossAxisAlignment.end
+                                            : CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                senderName,
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              if (isMe)
+                                                Padding(
+                                                  padding: const EdgeInsets.only(left: 7.0),
+                                                  child: Icon(
+                                                    Icons.done_all,
+                                                    color: isRead ? Colors.blue : Colors.white,
+                                                    size: 18,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            text,
+                                            style: const TextStyle(
+                                              fontSize: 15.5,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
-                                ),
+                                    ),
+                                  );
+                                },
                               );
                             },
-                          );
-                        },
-                      ),
-                    ),
-            ),
-            const Divider(height: 1),
-            // Mesaj kutusu ve butonlar
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: kPrimaryPurple.withOpacity(0.13), width: 2),
+                          ),
+                        ),
                 ),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(Icons.emoji_emotions, color: kPrimaryPink, size: 28),
-                    onPressed: _chatUsers.isNotEmpty && _selectedUserId != _userId
-                        ? _toggleEmojiPicker
-                        : null,
+                const Divider(height: 1),
+                // Mesaj kutusu ve butonlar
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.92),
+                    border: Border(
+                      top: BorderSide(color: kPrimaryPurple.withOpacity(0.13), width: 2),
+                    ),
                   ),
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focusNode,
-                      decoration: InputDecoration(
-                        hintText: _chatUsers.isEmpty
-                            ? 'Sohbet için kişi yok'
-                            : (_selectedUserId == _userId
-                                ? 'Kendinize mesaj atamazsınız'
-                                : 'Mesajınızı yazın...'),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        filled: true,
-                        fillColor: kPrimaryPurple.withOpacity(0.04),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.emoji_emotions, color: Color(0xFFFF1585), size: 28),
+                        onPressed: _chatUsers.isNotEmpty && _selectedUserId != _userId
+                            ? _toggleEmojiPicker
+                            : null,
                       ),
-                      enabled: _chatUsers.isNotEmpty && _selectedUserId != _userId,
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.send, color: kPrimaryPurple),
-                    onPressed: _chatUsers.isNotEmpty && _selectedUserId != _userId
-                        ? _sendMessage
-                        : null,
-                  ),
-                ],
-              ),
-            ),
-            if (_showEmojiPicker)
-              SizedBox(
-                height: 310,
-                child: EmojiPicker(
-                  onEmojiSelected: (category, emoji) {
-                    _onEmojiSelected(emoji);
-                  },
-                  config: const Config(
-                    height: 256,
-                    checkPlatformCompatibility: true,
-                    emojiViewConfig: EmojiViewConfig(
-                      emojiSizeMax: 28 * 1.5,
-                      columns: 7,
-                      verticalSpacing: 0,
-                      horizontalSpacing: 0,
-                    ),
-                    skinToneConfig: SkinToneConfig(),
-                    categoryViewConfig: CategoryViewConfig(),
-                    bottomActionBarConfig: BottomActionBarConfig(),
-                    searchViewConfig: SearchViewConfig(),
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          decoration: InputDecoration(
+                            hintText: _chatUsers.isEmpty
+                                ? 'Sohbet için kişi yok'
+                                : (_selectedUserId == _userId
+                                    ? 'Kendinize mesaj atamazsınız'
+                                    : 'Mesajınızı yazın...'),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(28),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            filled: true,
+                            fillColor: Color(0xFFF8F6F6),
+                          ),
+                          enabled: _chatUsers.isNotEmpty && _selectedUserId != _userId,
+                          onSubmitted: (_) => _sendMessage(),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.send, color: Colors.brown),
+                        onPressed: _chatUsers.isNotEmpty && _selectedUserId != _userId
+                            ? _sendMessage
+                            : null,
+                      ),
+                    ],
                   ),
                 ),
-              ),
+                if (_showEmojiPicker)
+                  SizedBox(
+                    height: 310,
+                    child: EmojiPicker(
+                      onEmojiSelected: (category, emoji) {
+                        _onEmojiSelected(emoji);
+                      },
+                      config: const Config(
+                        height: 256,
+                        checkPlatformCompatibility: true,
+                        emojiViewConfig: EmojiViewConfig(
+                          emojiSizeMax: 28 * 1.5,
+                          columns: 7,
+                          verticalSpacing: 0,
+                          horizontalSpacing: 0,
+                        ),
+                        skinToneConfig: SkinToneConfig(),
+                        categoryViewConfig: CategoryViewConfig(),
+                        bottomActionBarConfig: BottomActionBarConfig(),
+                        searchViewConfig: SearchViewConfig(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       ),

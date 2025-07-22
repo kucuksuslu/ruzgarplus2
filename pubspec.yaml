@@ -42,9 +42,9 @@ dependencies:
   location: ^8.0.0
   permission_handler: 11.4.0
   emoji_picker_flutter: ^4.3.0
-  
+  google_fonts: ^6.2.1
   cupertino_icons: ^1.0.8
-
+  
 
 dev_dependencies:
   flutter_test:
@@ -52,15 +52,15 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
 
-flutter_icons:
+flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/plusicon.png"
+  image_path: "assets/logoapp2.png"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/
-    - assets/backlog_fixed.mp4
+   
 
 # --- SÜRÜM SABİTLEME (override) ---
